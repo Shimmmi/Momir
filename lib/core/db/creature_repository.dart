@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../../models/creature.dart';
+import '../constants.dart';
 import 'database.dart';
 
 class CreatureRepository {
@@ -54,14 +55,14 @@ class CreatureRepository {
     return rows.map((r) => r['id'] as String).toSet();
   }
 
-  /// [cmc] 0–9 exact; 10 means 10+.
+  /// [cmc] 0–[kMaxExactCmc] exact; [kMaxExactCmc]+1 means that value and above.
   Future<Creature?> pickRandom(int cmc, {Set<String> colors = const {}}) async {
     final db = await _database.db;
     final where = StringBuffer();
     final args = <Object>[];
-    if (cmc >= 10) {
+    if (cmc > kMaxExactCmc) {
       where.write('cmc >= ?');
-      args.add(10);
+      args.add(kMaxExactCmc + 1);
     } else {
       where.write('cmc = ?');
       args.add(cmc);

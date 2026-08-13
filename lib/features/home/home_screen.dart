@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../app/settings_controller.dart';
 import '../../app/summon_controller.dart';
+import '../../core/constants.dart';
 import '../../core/ble/printer_connection_service.dart';
 import '../../core/scryfall/scryfall_sync_service.dart';
 import '../../widgets/mana_symbol.dart';
@@ -104,14 +105,15 @@ class HomeScreen extends StatelessWidget {
             crossAxisSpacing: 10,
             childAspectRatio: 1.15,
             children: [
-              for (var i = 0; i <= 9; i++)
+              for (var i = 0; i <= kMaxExactCmc; i++)
                 _CmcButton(
                   label: '$i',
                   onTap: () => _summon(context, summon, settings, i),
                 ),
               _CmcButton(
-                label: '10+',
-                onTap: () => _summon(context, summon, settings, 10),
+                label: '${kMaxExactCmc + 1}+',
+                onTap: () =>
+                    _summon(context, summon, settings, kMaxExactCmc + 1),
               ),
             ],
           ),

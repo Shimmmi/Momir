@@ -23,6 +23,32 @@ void main() {
     expect(manaAssetPath('W/U'), 'assets/mana/W_U.png');
   });
 
+  test('oraclePieces keeps spaces and paragraph breaks', () {
+    final pieces = oraclePieces('{T}: Draw a card.\nFlying');
+    expect(
+      pieces.map((p) => p.kind).toList(),
+      [
+        OraclePieceKind.symbol,
+        OraclePieceKind.word,
+        OraclePieceKind.space,
+        OraclePieceKind.word,
+        OraclePieceKind.space,
+        OraclePieceKind.word,
+        OraclePieceKind.space,
+        OraclePieceKind.word,
+        OraclePieceKind.lineBreak,
+        OraclePieceKind.word,
+      ],
+    );
+    expect(
+      pieces
+          .where((p) => p.kind == OraclePieceKind.word)
+          .map((p) => p.text)
+          .toList(),
+      [':', 'Draw', 'a', 'card.', 'Flying'],
+    );
+  });
+
   test('packRgbaToRaster sets MSB-first black bits', () {
     // 8x1 white then one black pixel at x=0
     final rgba = List<int>.filled(8 * 4, 255);

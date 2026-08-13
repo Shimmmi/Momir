@@ -335,68 +335,72 @@ class CardRenderService {
     Offset origin,
   ) {
     const fontSize = 13.0;
-    const lineH = 17.0;
-    const icon = 13.0;
+    const lineH = 18.0;
+    const icon = 14.0;
+    const paragraphGap = 6.0;
     var x = 0.0;
     var y = 0.0;
+    var atLineStart = true;
 
-    void newline() {
+    void newline({bool paragraph = false}) {
       x = 0;
-      y += lineH;
+      y += lineH + (paragraph ? paragraphGap : 0);
+      atLineStart = true;
     }
 
-    final spans = parseManaText(text);
-    for (final span in spans) {
+    final spaceWidth = _spaceWidth(fontSize);
+    final pieces = oraclePieces(text);
+    for (final piece in pieces) {
       if (y + lineH > maxHeight) break;
-      if (span.isSymbol) {
-        if (x + icon > maxWidth) newline();
-        if (y + lineH > maxHeight) break;
-        if (canvas != null) {
-          _paintSymbol(
-            canvas,
-            span.symbol!,
-            Offset(origin.dx + x, origin.dy + y),
-            icon,
-          );
-        }
-        x += icon + 2;
-        continue;
-      }
-      final parts = (span.text ?? '').split(RegExp(r'(\s+)'));
-      for (final part in parts) {
-        if (part.isEmpty) continue;
-        if (part.contains('\n')) {
-          final bits = part.split('\n');
-          for (var i = 0; i < bits.length; i++) {
-            if (bits[i].isNotEmpty) {
-              final tp = _word(bits[i], fontSize);
-              if (x + tp.width > maxWidth && x > 0) newline();
-              if (y + lineH > maxHeight) return y;
-              if (canvas != null) {
-                tp.paint(canvas, Offset(origin.dx + x, origin.dy + y));
-              }
-              x += tp.width;
-            }
-            if (i != bits.length - 1) newline();
+      switch (piece.kind) {
+        case OraclePieceKind.lineBreak:
+          newline(paragraph: true);
+          if (y + lineH > maxHeight) return y;
+        case OraclePieceKind.space:
+          if (atLineStart) break;
+          if (x + spaceWidth > maxWidth) {
+            newline();
+          } else {
+            x += spaceWidth;
           }
-          continue;
-        }
-        final tp = _word(part, fontSize);
-        if (x + tp.width > maxWidth && x > 0) newline();
-        if (y + lineH > maxHeight) {
+        case OraclePieceKind.symbol:
+          if (x + icon > maxWidth && !atLineStart) newline();
+          if (y + lineH > maxHeight) return y;
           if (canvas != null) {
-            final ell = _word('…', fontSize);
-            ell.paint(canvas, Offset(origin.dx + x, origin.dy + y));
+            _paintSymbol(
+              canvas,
+              piece.symbol!,
+              Offset(origin.dx + x, origin.dy + y),
+              icon,
+            );
           }
-          return maxHeight;
-        }
-        if (canvas != null) {
-          tp.paint(canvas, Offset(origin.dx + x, origin.dy + y));
-        }
-        x += tp.width;
+          x += icon + 1;
+          atLineStart = false;
+        case OraclePieceKind.word:
+          final tp = _word(piece.text ?? '', fontSize);
+          if (x + tp.width > maxWidth && !atLineStart) newline();
+          if (y + lineH > maxHeight) {
+            if (canvas != null) {
+              _word('…', fontSize).paint(
+                canvas,
+                Offset(origin.dx + x, origin.dy + y),
+              );
+            }
+            return maxHeight;
+          }
+          if (canvas != null) {
+            tp.paint(canvas, Offset(origin.dx + x, origin.dy + y));
+          }
+          x += tp.width;
+          atLineStart = false;
       }
     }
     return y + lineH;
+  }
+
+  double _spaceWidth(double fontSize) {
+    final gap = _word('x x', fontSize).width - _word('xx', fontSize).width;
+    return gap >= 1 ? gap : fontSize * 0.3;
   }
 
   TextPainter _word(String text, double fontSize) {
