@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -11,6 +12,7 @@ import '../art/art_cache_service.dart';
 import '../constants.dart';
 import '../db/creature_repository.dart';
 import '../db/database.dart';
+import 'bulk_uri.dart';
 import 'card_extractor.dart';
 import 'json_array_reader.dart';
 
@@ -184,8 +186,14 @@ class ScryfallSyncService extends ChangeNotifier {
         message: 'Запрашиваю индекс Scryfall…',
       ),
     );
-    final index = await _dio.get<Map<String, dynamic>>(kBulkDataUrl);
-    final data = index.data?['data'] as List<dynamic>? ?? const [];
+    final index = await _dio.get<dynamic>(kBulkDataUrl);
+    final payload = index.data;
+    final root = payload is Map
+        ? Map<String, dynamic>.from(payload)
+        : payload is String
+        ? Map<String, dynamic>.from(jsonDecode(payload) as Map)
+        : <String, dynamic>{};
+    final data = root['data'] as List<dynamic>? ?? const [];
     Map<String, dynamic>? oracle;
     for (final raw in data) {
       if (raw is Map && raw['type'] == 'oracle_cards') {
@@ -193,12 +201,15 @@ class ScryfallSyncService extends ChangeNotifier {
         break;
       }
     }
-    if (oracle == null || oracle['download_uri'] is! String) {
+    final uri = oracle == null ? null : bulkDownloadUri(oracle);
+    if (uri == null) {
       throw StateError('Не найден пакет oracle_cards');
     }
-    final uri = oracle['download_uri'] as String;
     final tmpDir = await getTemporaryDirectory();
-    final bulkFile = File(p.join(tmpDir.path, 'oracle_cards.json'));
+    final ext = isJsonlUri(uri)
+        ? (isGzipUri(uri) ? 'jsonl.gz' : 'jsonl')
+        : (isGzipUri(uri) ? 'json.gz' : 'json');
+    final bulkFile = File(p.join(tmpDir.path, 'oracle_cards.$ext'));
 
     _emit(
       _progress.copyWith(
@@ -233,7 +244,11 @@ class ScryfallSyncService extends ChangeNotifier {
     await _repository.clearCreatures();
     var inserted = 0;
     var batch = <Creature>[];
-    await for (final card in readJsonArrayObjects(bulkFile)) {
+    await for (final card in readBulkCardObjects(
+      bulkFile,
+      gzipped: isGzipUri(uri),
+      jsonl: isJsonlUri(uri),
+    )) {
       final creature = extractCreature(card);
       if (creature == null) continue;
       batch.add(creature);

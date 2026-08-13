@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:momir/core/ble/escpos_encoder.dart';
 import 'package:momir/core/mana/mana_cost_parser.dart';
+import 'package:momir/core/scryfall/bulk_uri.dart';
 import 'package:momir/core/scryfall/card_extractor.dart';
 import 'package:momir/core/scryfall/json_array_reader.dart';
 
@@ -114,6 +115,34 @@ void main() {
     expect(c?.manaCost, '{U}');
   });
 
+  test('bulkDownloadUri prefers jsonl_download_uri', () {
+    expect(
+      bulkDownloadUri({
+        'type': 'oracle_cards',
+        'jsonl_download_uri': 'https://example.com/oracle.jsonl.gz',
+      }),
+      'https://example.com/oracle.jsonl.gz',
+    );
+    expect(isGzipUri('https://x/oracle.jsonl.gz'), isTrue);
+    expect(isJsonlUri('https://x/oracle.jsonl.gz'), isTrue);
+  });
+
+  test('jsonl reader yields objects', () async {
+    final dir = await Directory.systemTemp.createTemp('momir');
+    final file = File('${dir.path}/cards.jsonl');
+    await file.writeAsString(
+      '${jsonEncode({'id': '1', 'name': 'A'})}\n${jsonEncode({'id': '2', 'name': 'B'})}\n',
+    );
+    final items = await readBulkCardObjects(
+      file,
+      gzipped: false,
+      jsonl: true,
+    ).toList();
+    expect(items.length, 2);
+    expect(items.first['name'], 'A');
+    await dir.delete(recursive: true);
+  });
+
   test('json array scanner yields objects', () async {
     final dir = await Directory.systemTemp.createTemp('momir');
     final file = File('${dir.path}/cards.json');
@@ -123,7 +152,11 @@ void main() {
         {'id': '2', 'name': 'B'},
       ]),
     );
-    final items = await readJsonArrayObjects(file).toList();
+    final items = await readBulkCardObjects(
+      file,
+      gzipped: false,
+      jsonl: false,
+    ).toList();
     expect(items.length, 2);
     expect(items.first['name'], 'A');
     await dir.delete(recursive: true);
