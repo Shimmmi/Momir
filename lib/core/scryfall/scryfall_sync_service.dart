@@ -173,7 +173,6 @@ class ScryfallSyncService extends ChangeNotifier {
           message: 'Ошибка синхронизации',
         ),
       );
-      rethrow;
     }
   }
 
@@ -186,24 +185,32 @@ class ScryfallSyncService extends ChangeNotifier {
         message: 'Запрашиваю индекс Scryfall…',
       ),
     );
-    final index = await _dio.get<dynamic>(kBulkDataUrl);
-    final payload = index.data;
-    final root = payload is Map
-        ? Map<String, dynamic>.from(payload)
-        : payload is String
-        ? Map<String, dynamic>.from(jsonDecode(payload) as Map)
-        : <String, dynamic>{};
-    final data = root['data'] as List<dynamic>? ?? const [];
     Map<String, dynamic>? oracle;
-    for (final raw in data) {
-      if (raw is Map && raw['type'] == 'oracle_cards') {
-        oracle = Map<String, dynamic>.from(raw);
-        break;
+    try {
+      final direct = await _dio.get<dynamic>(kOracleCardsUrl);
+      oracle = _asJsonMap(direct.data);
+      if (oracle['type'] != 'oracle_cards' && oracle['object'] != 'bulk_data') {
+        oracle = null;
+      }
+    } catch (_) {
+      oracle = null;
+    }
+    if (oracle == null) {
+      final index = await _dio.get<dynamic>(kBulkDataUrl);
+      final root = _asJsonMap(index.data);
+      final data = root['data'] as List<dynamic>? ?? const [];
+      for (final raw in data) {
+        if (raw is Map && raw['type'] == 'oracle_cards') {
+          oracle = Map<String, dynamic>.from(raw);
+          break;
+        }
       }
     }
     final uri = oracle == null ? null : bulkDownloadUri(oracle);
     if (uri == null) {
-      throw StateError('Не найден пакет oracle_cards');
+      throw StateError(
+        'Не найден пакет oracle_cards. Проверьте интернет и повторите.',
+      );
     }
     final tmpDir = await getTemporaryDirectory();
     final ext = isJsonlUri(uri)
@@ -361,4 +368,14 @@ class ScryfallSyncService extends ChangeNotifier {
       List.generate(kArtConcurrency, (_) => worker()),
     );
   }
+}
+
+Map<String, dynamic> _asJsonMap(dynamic payload) {
+  if (payload is Map<String, dynamic>) return payload;
+  if (payload is Map) return Map<String, dynamic>.from(payload);
+  if (payload is String && payload.trim().isNotEmpty) {
+    final decoded = jsonDecode(payload);
+    if (decoded is Map) return Map<String, dynamic>.from(decoded);
+  }
+  return <String, dynamic>{};
 }

@@ -1,6 +1,8 @@
 const kAppName = 'Momir IRL';
-const kScryfallUserAgent = 'MomirIRL/1.0 (Flutter; local MTG Momir printer)';
+const kScryfallUserAgent =
+    'MomirIRL/1.0 (Flutter; https://github.com/Shimmmi/Momir)';
 const kBulkDataUrl = 'https://api.scryfall.com/bulk-data';
+const kOracleCardsUrl = 'https://api.scryfall.com/bulk-data/oracle-cards';
 const kPrefsPrinterId = 'printer_remote_id';
 const kPrefsPrinterName = 'printer_name';
 const kPrefsReroll = 'reroll_enabled';
