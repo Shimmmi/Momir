@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:image/image.dart' as img;
+import 'package:momir/core/art/art_prep.dart';
 import 'package:momir/core/ble/escpos_encoder.dart';
 import 'package:momir/core/mana/mana_cost_parser.dart';
 import 'package:momir/core/scryfall/bulk_uri.dart';
@@ -21,6 +23,41 @@ void main() {
     ]);
     expect(spans.any((s) => s.text?.contains('Draw a card') == true), isTrue);
     expect(manaAssetPath('W/U'), 'assets/mana/W_U.png');
+  });
+
+  test('flattenOnWhite composites transparent pixels onto white', () {
+    final src = img.Image(width: 2, height: 1, numChannels: 4);
+    src.setPixelRgba(0, 0, 0, 0, 0, 0);
+    src.setPixelRgba(1, 0, 0, 0, 255, 255);
+    final out = flattenOnWhite(src);
+    expect(out.getPixel(0, 0).r, 255);
+    expect(out.getPixel(0, 0).g, 255);
+    expect(out.getPixel(0, 0).b, 255);
+    expect(out.getPixel(1, 0).b, 255);
+    expect(out.getPixel(1, 0).r, 0);
+  });
+
+  test('ditherToBlackWhite keeps black and white on a gradient', () {
+    final src = img.Image(width: 32, height: 8, numChannels: 3);
+    for (final p in src) {
+      final v = (p.x * 8).clamp(0, 255);
+      p
+        ..r = v
+        ..g = v
+        ..b = v;
+    }
+    final bw = ditherToBlackWhite(src);
+    var black = 0;
+    var white = 0;
+    for (final p in bw) {
+      if (p.r < 128) {
+        black++;
+      } else {
+        white++;
+      }
+    }
+    expect(black, greaterThan(10));
+    expect(white, greaterThan(10));
   });
 
   test('oraclePieces keeps spaces and paragraph breaks', () {

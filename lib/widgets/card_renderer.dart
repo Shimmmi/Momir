@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 
+import '../core/art/art_prep.dart';
 import '../core/ble/escpos_encoder.dart';
 import '../core/ble/printer_profile.dart';
 import '../core/constants.dart';
@@ -97,13 +98,7 @@ class CardRenderService {
     if (decoded == null) {
       throw StateError('Не удалось декодировать арт');
     }
-    final gray = img.grayscale(decoded);
-    final bw = img.quantize(
-      gray,
-      numberOfColors: 2,
-      method: img.QuantizeMethod.binary,
-      dither: img.DitherKernel.floydSteinberg,
-    );
+    final bw = ditherToBlackWhite(flattenOnWhite(decoded));
     final rgba = bw.convert(numChannels: 4);
     final bytes = rgba.getBytes(order: img.ChannelOrder.rgba);
     final completer = Completer<ui.Image>();

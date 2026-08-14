@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../constants.dart';
+import 'art_prep.dart';
 
 class ArtCacheService {
   Directory? _dir;
@@ -37,7 +38,8 @@ class ArtCacheService {
     if (decoded == null) {
       throw StateError('Could not decode art for $id');
     }
-    final fitted = _coverResize(decoded, kArtWidth, kArtHeight);
+    final flattened = flattenOnWhite(decoded);
+    final fitted = _coverResize(flattened, kArtWidth, kArtHeight);
     final jpg = img.encodeJpg(fitted, quality: kArtJpegQuality);
     final dest = await fileFor(id);
     final tmp = File('${dest.path}.tmp');
