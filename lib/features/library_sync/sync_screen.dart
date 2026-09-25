@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/art/art_download_guard.dart';
 import '../../core/scryfall/scryfall_sync_service.dart';
 import '../../core/db/creature_repository.dart';
 import '../../core/db/database.dart';
@@ -106,7 +108,9 @@ class SyncScreen extends StatelessWidget {
                   child: const Text('Играть, арты докачаются'),
                 ),
             ],
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            const _BatteryHint(),
+            const SizedBox(height: 8),
             FutureBuilder(
               future: _meta(context),
               builder: (context, snap) {
@@ -131,6 +135,62 @@ class SyncScreen extends StatelessWidget {
     final count = await repo.count();
     final when = last == null ? 'никогда' : last.replaceFirst('T', ' ').split('.').first;
     return 'Последняя синхронизация: $when\nСуществ в базе: $count';
+  }
+}
+
+class _BatteryHint extends StatefulWidget {
+  const _BatteryHint();
+
+  @override
+  State<_BatteryHint> createState() => _BatteryHintState();
+}
+
+class _BatteryHintState extends State<_BatteryHint> with WidgetsBindingObserver {
+  var _show = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final granted = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
+    if (!mounted) return;
+    setState(() => _show = !granted);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_show) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Если телефон обрывает загрузку при выключенном экране, разрешите Momir работу без ограничений батареи.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        TextButton(
+          onPressed: () async {
+            await ArtDownloadGuard.askBatteryExemption();
+            await _refresh();
+          },
+          child: const Text('Разрешить работу без ограничений'),
+        ),
+      ],
+    );
   }
 }
 

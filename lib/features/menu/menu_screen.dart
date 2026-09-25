@@ -17,8 +17,6 @@ class MenuScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text('Momir', style: text.displaySmall),
-              const SizedBox(height: 8),
-              Text('Один телефон на стол.', style: text.bodyMedium),
               const SizedBox(height: 28),
               FilledButton(
                 onPressed: () => context.push('/match'),

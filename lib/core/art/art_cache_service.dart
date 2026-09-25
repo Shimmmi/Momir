@@ -1,10 +1,12 @@
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../constants.dart';
 import 'art_prep.dart';
@@ -12,12 +14,75 @@ import 'art_prep.dart';
 class ArtCacheService {
   Directory? _dir;
 
+  static const publicArtPath = '/storage/emulated/0/Documents/Momir/art';
+
   Future<Directory> get directory async {
     if (_dir != null) return _dir!;
-    final root = await getApplicationDocumentsDirectory();
-    _dir = Directory(p.join(root.path, 'art'));
+    final public = await _publicArtDir();
+    if (public != null) {
+      _dir = public;
+    } else {
+      final root = await getApplicationDocumentsDirectory();
+      _dir = Directory(p.join(root.path, 'art'));
+    }
     await _dir!.create(recursive: true);
     return _dir!;
+  }
+
+  Future<Directory?> _publicArtDir() async {
+    if (kIsWeb || !Platform.isAndroid) return null;
+    final granted = await _ensurePublicStorage();
+    if (!granted) return null;
+    final dir = Directory(publicArtPath);
+    await dir.create(recursive: true);
+    return dir;
+  }
+
+  Future<bool> _ensurePublicStorage() async {
+    if (await Permission.manageExternalStorage.isGranted) return true;
+    final managed = await Permission.manageExternalStorage.request();
+    if (managed.isGranted) return true;
+    final storage = await Permission.storage.request();
+    return storage.isGranted;
+  }
+
+  /// Copies pictures out of the app-private folder once, so an uninstall
+  /// that keeps Documents does not throw away the download.
+  Future<void> migrateFromInternal() async {
+    final public = await _publicArtDir();
+    if (public == null) return;
+    final root = await getApplicationDocumentsDirectory();
+    final internal = Directory(p.join(root.path, 'art'));
+    if (!await internal.exists()) return;
+    await for (final entity in internal.list(recursive: true)) {
+      if (entity is! File || !entity.path.endsWith('.jpg')) continue;
+      final rel = p.relative(entity.path, from: internal.path);
+      final dest = File(p.join(public.path, rel));
+      await dest.parent.create(recursive: true);
+      if (!await dest.exists()) {
+        await entity.copy(dest.path);
+      }
+      await entity.delete();
+    }
+    _dir = public;
+  }
+
+  Future<int> deleteAllImages() async {
+    var removed = 0;
+    Future<void> wipe(Directory dir) async {
+      if (!await dir.exists()) return;
+      await for (final entity in dir.list(recursive: true)) {
+        if (entity is! File || !entity.path.endsWith('.jpg')) continue;
+        await entity.delete();
+        removed++;
+      }
+    }
+
+    await wipe(Directory(publicArtPath));
+    final root = await getApplicationDocumentsDirectory();
+    await wipe(Directory(p.join(root.path, 'art')));
+    _dir = null;
+    return removed;
   }
 
   Future<File> fileFor(String id) async {

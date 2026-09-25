@@ -6,7 +6,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app/app.dart';
 import 'app/settings_controller.dart';
 import 'app/summon_controller.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+
 import 'core/art/art_cache_service.dart';
+import 'core/art/art_download_guard.dart';
 import 'core/ble/printer_connection_service.dart';
 import 'core/ble/saved_printers.dart';
 import 'core/db/creature_repository.dart';
@@ -18,6 +21,8 @@ import 'widgets/card_renderer.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  FlutterForegroundTask.initCommunicationPort();
+  ArtDownloadGuard.init();
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
   ]);
@@ -26,6 +31,7 @@ Future<void> main() async {
   await database.open();
   final repository = CreatureRepository(database);
   final artCache = ArtCacheService();
+  await artCache.migrateFromInternal();
   final renderer = CardRenderService();
   final savedPrinters = SavedPrinterStore(database);
   final matches = MatchRepository(database);

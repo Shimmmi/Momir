@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../models/creature.dart';
 import '../art/art_cache_service.dart';
+import '../art/art_download_guard.dart';
 import '../constants.dart';
 import '../db/creature_repository.dart';
 import '../db/database.dart';
@@ -127,12 +128,14 @@ class ScryfallSyncService extends ChangeNotifier {
     _paused = true;
     _pauseGate ??= Completer<void>();
     _emit(_progress.copyWith(message: 'Пауза'));
+    ArtDownloadGuard.stop();
   }
 
   void resumeDownloads() {
     _paused = false;
     _pauseGate?.complete();
     _pauseGate = null;
+    ArtDownloadGuard.start('Качаю арты…');
     notifyListeners();
   }
 
@@ -156,7 +159,11 @@ class ScryfallSyncService extends ChangeNotifier {
         final count = await _repository.count();
         _emit(_progress.copyWith(phase: SyncPhase.downloadingArt, creatureCount: count));
       }
-      await _syncArts();
+      try {
+        await _syncArts();
+      } finally {
+        await ArtDownloadGuard.stop();
+      }
       await _artCache.pruneOrphans(await _repository.allIds());
       await _database.setMeta(kMetaLastSync, DateTime.now().toIso8601String());
       await _database.setMeta(
@@ -325,26 +332,31 @@ class ScryfallSyncService extends ChangeNotifier {
       ),
     );
 
+    if (missing.isNotEmpty) {
+      await ArtDownloadGuard.start('Арты: $done / ${jobs.length * 2}');
+    }
     final failed = <({String id, String url, bool display})>[];
-    await _downloadPool(missing, failed);
+    await _downloadPool(missing, failed, countFailures: false);
     if (failed.isNotEmpty && !_cancel) {
       _emit(
         _progress.copyWith(
           phase: SyncPhase.retryingArt,
-          artsFailed: failed.length,
+          artsFailed: 0,
           message: 'Повтор неудачных артов: ${failed.length}',
         ),
       );
+      await ArtDownloadGuard.update('Повтор: ${failed.length}');
       final still = <({String id, String url, bool display})>[];
-      await _downloadPool(failed, still);
+      await _downloadPool(failed, still, countFailures: true);
       _emit(_progress.copyWith(artsFailed: still.length));
     }
   }
 
   Future<void> _downloadPool(
     List<({String id, String url, bool display})> items,
-    List<({String id, String url, bool display})> failedOut,
-  ) async {
+    List<({String id, String url, bool display})> failedOut, {
+    required bool countFailures,
+  }) async {
     final queue = List<({String id, String url, bool display})>.from(items);
     Future<void> worker() async {
       while (queue.isNotEmpty && !_cancel) {
@@ -368,16 +380,20 @@ class ScryfallSyncService extends ChangeNotifier {
           } else {
             await _artCache.storeFromBytes(job.id, bytes);
           }
+          final message =
+              'Арты: ${_progress.artsDone + 1} / ${_progress.artsTotal}';
           _emit(
             _progress.copyWith(
               artsDone: _progress.artsDone + 1,
-              message:
-                  'Арты: ${_progress.artsDone + 1} / ${_progress.artsTotal}',
+              message: message,
             ),
           );
+          await ArtDownloadGuard.update(message);
         } catch (_) {
           failedOut.add(job);
-          _emit(_progress.copyWith(artsFailed: _progress.artsFailed + 1));
+          if (countFailures) {
+            _emit(_progress.copyWith(artsFailed: _progress.artsFailed + 1));
+          }
         }
         await Future<void>.delayed(kScryfallDelay);
       }

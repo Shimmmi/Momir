@@ -21,6 +21,7 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   final _query = TextEditingController();
+  final _setQuery = TextEditingController();
   final _colors = <String>{};
   int? _cmc;
   String? _setCode;
@@ -29,6 +30,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   var _offset = 0;
   var _hasMore = true;
   List<({String code, String name})> _sets = const [];
+  List<({String code, String name})> _setHits = const [];
   final _cards = <Creature>[];
 
   @override
@@ -40,7 +42,37 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void dispose() {
     _query.dispose();
+    _setQuery.dispose();
     super.dispose();
+  }
+
+  Future<void> _confirmDeleteImages(BuildContext context) async {
+    final art = context.read<ArtCacheService>();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить все изображения?'),
+        content: const Text(
+          'Картинки на телефоне будут стёрты. База существ и партии останутся. Потом их можно скачать снова.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await art.deleteAllImages();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Изображения удалены')),
+    );
   }
 
   Future<void> _boot() async {
@@ -81,6 +113,52 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
   }
 
+  void _onSetQuery(String raw) {
+    final q = raw.trim().toLowerCase();
+    if (q.isEmpty) {
+      setState(() {
+        _setHits = const [];
+        _setCode = null;
+      });
+      _reload();
+      return;
+    }
+    final hits = _sets.where((set) => _matchesSet(set, q)).toList()
+      ..sort((a, b) => _setRank(a, q).compareTo(_setRank(b, q)));
+    setState(() {
+      _setHits = hits.take(6).toList();
+      _setCode = hits.isEmpty ? null : hits.first.code;
+    });
+    _reload();
+  }
+
+  void _pickSet(({String code, String name}) set) {
+    _setQuery.value = TextEditingValue(
+      text: set.name,
+      selection: TextSelection.collapsed(offset: set.name.length),
+    );
+    setState(() {
+      _setCode = set.code;
+      _setHits = const [];
+    });
+    _reload();
+  }
+
+  bool _matchesSet(({String code, String name}) set, String q) {
+    return set.name.toLowerCase().contains(q) ||
+        set.code.toLowerCase().contains(q);
+  }
+
+  int _setRank(({String code, String name}) set, String q) {
+    final code = set.code.toLowerCase();
+    final name = set.name.toLowerCase();
+    if (code == q) return 0;
+    if (code.startsWith(q)) return 1;
+    if (code.contains(q)) return 2;
+    if (name.startsWith(q)) return 3;
+    return 4;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -91,6 +169,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
           onPressed: () => context.go('/menu'),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Удалить изображения',
+            onPressed: () => _confirmDeleteImages(context),
+            icon: const Icon(Icons.delete_outline),
+          ),
           IconButton(
             tooltip: 'Обновить',
             onPressed: () => context.push('/sync'),
@@ -111,46 +194,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
               onSubmitted: (_) => _reload(),
             ),
           ),
-          SizedBox(
-            height: 52,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    label: const Text('Любая мана'),
-                    selected: _cmc == null,
-                    onSelected: (_) {
-                      setState(() => _cmc = null);
-                      _reload();
-                    },
-                  ),
-                ),
-                for (var i = 0; i <= kMaxExactCmc; i++)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: FilterChip(
-                      label: Text('$i'),
-                      selected: _cmc == i,
-                      onSelected: (_) {
-                        setState(() => _cmc = _cmc == i ? null : i);
-                        _reload();
-                      },
-                    ),
-                  ),
-                FilterChip(
-                  label: Text('${kMaxExactCmc + 1}+'),
-                  selected: _cmc == kMaxExactCmc + 1,
-                  onSelected: (_) {
-                    setState(() {
-                      _cmc = _cmc == kMaxExactCmc + 1 ? null : kMaxExactCmc + 1;
-                    });
-                    _reload();
-                  },
-                ),
-              ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: _CmcGrid(
+              selected: _cmc,
+              onPick: (value) {
+                setState(() => _cmc = value);
+                _reload();
+              },
             ),
           ),
           Padding(
@@ -180,28 +231,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: DropdownButton<String?>(
-                    isExpanded: true,
-                    value: _setCode,
-                    hint: const Text('Все сеты'),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('Все сеты'),
-                      ),
-                      for (final set in _sets)
-                        DropdownMenuItem<String?>(
-                          value: set.code,
-                          child: Text(
-                            set.name,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: (value) {
-                      setState(() => _setCode = value);
-                      _reload();
-                    },
+                  child: TextField(
+                    controller: _setQuery,
+                    decoration: const InputDecoration(
+                      hintText: 'Сет',
+                      isDense: true,
+                    ),
+                    onChanged: _onSetQuery,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -215,6 +251,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ],
             ),
           ),
+          if (_setHits.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+              child: Column(
+                children: [
+                  for (final set in _setHits)
+                    _SetHit(
+                      name: set.name,
+                      highlighted: set.code == _setCode,
+                      onTap: () => _pickSet(set),
+                    ),
+                ],
+              ),
+            ),
           Expanded(
             child: NotificationListener<ScrollNotification>(
               onNotification: (note) {
@@ -251,6 +301,111 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CmcGrid extends StatelessWidget {
+  const _CmcGrid({required this.selected, required this.onPick});
+
+  final int? selected;
+  final ValueChanged<int?> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = <int?, String>{
+      null: 'Все',
+      for (var i = 0; i <= kMaxExactCmc; i++) i: '$i',
+      kMaxExactCmc + 1: '${kMaxExactCmc + 1}+',
+    };
+    return GridView.count(
+      crossAxisCount: 9,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 4,
+      crossAxisSpacing: 4,
+      childAspectRatio: 1.15,
+      children: [
+        for (final entry in labels.entries)
+          _CmcCell(
+            label: entry.value,
+            selected: selected == entry.key,
+            onTap: () => onPick(selected == entry.key ? null : entry.key),
+          ),
+      ],
+    );
+  }
+}
+
+class _CmcCell extends StatelessWidget {
+  const _CmcCell({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? momirPaper : Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(6),
+        side: BorderSide(color: selected ? momirPaper : momirLine),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: selected ? momirInk : momirPaper,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SetHit extends StatelessWidget {
+  const _SetHit({
+    required this.name,
+    required this.highlighted,
+    required this.onTap,
+  });
+
+  final String name;
+  final bool highlighted;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: highlighted ? const Color(0x33E4C56A) : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: highlighted ? momirGold : momirPaper,
+                fontWeight: highlighted ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

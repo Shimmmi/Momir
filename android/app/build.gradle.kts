@@ -29,11 +29,20 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("momir") {
+            // Same key that signed the installed builds, so an update
+            // replaces the app instead of demanding a fresh install.
+            storeFile = file("../momir-release.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("momir")
         }
     }
 }
