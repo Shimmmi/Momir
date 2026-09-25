@@ -26,6 +26,44 @@ class ArtCacheService {
 
   Future<bool> hasArt(String id) async => (await fileFor(id)).exists();
 
+  Future<Directory> get displayDirectory async {
+    final root = await directory;
+    final dir = Directory(p.join(root.path, 'display'));
+    await dir.create(recursive: true);
+    return dir;
+  }
+
+  Future<File> displayFileFor(String id) async {
+    return File(p.join((await displayDirectory).path, '$id.jpg'));
+  }
+
+  Future<bool> hasDisplay(String id) async => (await displayFileFor(id)).exists();
+
+  /// Screen image: keep the Scryfall frame, only shrink if it is wider than
+  /// [kDisplayMaxWidth]. This is not the thermal crop.
+  Future<void> storeDisplayFromBytes(String id, List<int> bytes) async {
+    final decoded = img.decodeImage(
+      bytes is Uint8List ? bytes : Uint8List.fromList(bytes),
+    );
+    if (decoded == null) {
+      throw StateError('Could not decode display art for $id');
+    }
+    final flat = flattenOnWhite(decoded);
+    final fitted = flat.width > kDisplayMaxWidth
+        ? img.copyResize(
+            flat,
+            width: kDisplayMaxWidth,
+            interpolation: img.Interpolation.linear,
+          )
+        : flat;
+    final jpg = img.encodeJpg(fitted, quality: kDisplayJpegQuality);
+    final dest = await displayFileFor(id);
+    final tmp = File('${dest.path}.tmp');
+    await tmp.writeAsBytes(jpg, flush: true);
+    if (await dest.exists()) await dest.delete();
+    await tmp.rename(dest.path);
+  }
+
   Future<int> cachedCount() async {
     final dir = await directory;
     if (!await dir.exists()) return 0;
@@ -58,6 +96,12 @@ class ArtCacheService {
       if (!validIds.contains(id)) {
         await entity.delete();
       }
+    }
+    final display = await displayDirectory;
+    await for (final entity in display.list()) {
+      if (entity is! File || !entity.path.endsWith('.jpg')) continue;
+      final id = p.basenameWithoutExtension(entity.path);
+      if (!validIds.contains(id)) await entity.delete();
     }
   }
 

@@ -8,8 +8,10 @@ import 'app/settings_controller.dart';
 import 'app/summon_controller.dart';
 import 'core/art/art_cache_service.dart';
 import 'core/ble/printer_connection_service.dart';
+import 'core/ble/saved_printers.dart';
 import 'core/db/creature_repository.dart';
 import 'core/db/database.dart';
+import 'core/db/match_repository.dart';
 import 'core/scryfall/scryfall_sync_service.dart';
 import 'services/print_service.dart';
 import 'widgets/card_renderer.dart';
@@ -25,13 +27,16 @@ Future<void> main() async {
   final repository = CreatureRepository(database);
   final artCache = ArtCacheService();
   final renderer = CardRenderService();
-  final printer = PrinterConnectionService(prefs);
+  final savedPrinters = SavedPrinterStore(database);
+  final matches = MatchRepository(database);
+  final printer = PrinterConnectionService(prefs, savedPrinters: savedPrinters);
   final prints = PrintService(connection: printer);
   final sync = ScryfallSyncService(
     database: database,
     repository: repository,
     artCache: artCache,
   );
+  await sync.loadStoredCount();
   final settings = SettingsController(prefs);
   final summon = SummonController(
     repository: repository,
@@ -47,6 +52,8 @@ Future<void> main() async {
       providers: [
         Provider.value(value: database),
         Provider.value(value: repository),
+        Provider.value(value: matches),
+        Provider.value(value: savedPrinters),
         Provider.value(value: artCache),
         Provider.value(value: renderer),
         Provider.value(value: prints),

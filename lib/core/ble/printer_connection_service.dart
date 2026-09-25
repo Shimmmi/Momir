@@ -3,54 +3,80 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_classic_bluetooth/flutter_classic_bluetooth.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants.dart';
 import 'printer_profile.dart';
+import 'saved_printers.dart';
 
 enum PrinterLinkState { idle, scanning, connecting, connected, disconnected }
 
 class ScannedPrinter {
-  ScannedPrinter({required this.device, required this.rssi, required this.likely});
+  ScannedPrinter({
+    required this.id,
+    required this.name,
+    required this.rssi,
+    required this.likely,
+    required this.kind,
+    this.bleDevice,
+  });
 
-  final BluetoothDevice device;
+  final String id;
+  final String name;
   final int rssi;
   final bool likely;
-
-  String get name {
-    final n = device.platformName.isNotEmpty
-        ? device.platformName
-        : device.advName;
-    return n.isEmpty ? device.remoteId.str : n;
-  }
+  final PrinterLinkKind kind;
+  final BluetoothDevice? bleDevice;
 }
 
 class PrinterConnectionService extends ChangeNotifier {
-  PrinterConnectionService(this._prefs);
+  PrinterConnectionService(
+    this._prefs, {
+    FlutterClassicBluetooth? classic,
+    this.savedPrinters,
+  }) : _classic = classic ?? FlutterClassicBluetooth();
 
   final SharedPreferences _prefs;
+  final SavedPrinterStore? savedPrinters;
+  final FlutterClassicBluetooth _classic;
 
   PrinterLinkState state = PrinterLinkState.idle;
   String? statusText;
+  String? connectedId;
+  String? connectedName;
+  PrinterLinkKind? connectedKind;
   BluetoothDevice? device;
   BluetoothCharacteristic? _writeChar;
+  BtcConnection? _classicConn;
+  StreamSubscription<BtcConnectionState>? _classicStateSub;
   PrinterProfile? profile;
   final scans = <String, ScannedPrinter>{};
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
+  var _suppressDrop = false;
 
   bool get isConnected =>
-      state == PrinterLinkState.connected && _writeChar != null;
+      state == PrinterLinkState.connected &&
+      (_writeChar != null || _classicConn != null);
 
   String? get savedId => _prefs.getString(kPrefsPrinterId);
   String? get savedName => _prefs.getString(kPrefsPrinterName);
 
+  PrinterLinkKind get savedKind {
+    final raw = _prefs.getString(kPrefsPrinterKind);
+    if (raw == PrinterLinkKind.ble.name) return PrinterLinkKind.ble;
+    return PrinterLinkKind.classic;
+  }
+
   bool isLikelyPrinter(String name) {
     final upper = name.toUpperCase();
-    return PrinterProfile.pt210.nameHints.any(
-      (hint) => upper.contains(hint.toUpperCase()),
-    );
+    final hints = [
+      ...PrinterProfile.xp365b.nameHints,
+      ...PrinterProfile.pt210.nameHints,
+    ];
+    return hints.any((hint) => upper.contains(hint.toUpperCase()));
   }
 
   Future<bool> requestPermissions() async {
@@ -80,10 +106,33 @@ class PrinterConnectionService extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    try {
+      await _classic.requestPermissions();
+    } catch (_) {}
+
     scans.clear();
     state = PrinterLinkState.scanning;
     statusText = 'Сканирование…';
     notifyListeners();
+    await stopScan(keepState: true);
+
+    if (Platform.isAndroid) {
+      try {
+        final paired = await _classic.getPairedDevices();
+        for (final d in paired) {
+          _addClassic(d);
+        }
+      } catch (_) {}
+      try {
+        final found = await _classic.scan(timeout: const Duration(seconds: 8));
+        for (final d in found) {
+          _addClassic(d);
+        }
+      } catch (e) {
+        statusText = 'Classic Bluetooth: $e';
+      }
+    }
+
     await _scanSub?.cancel();
     _scanSub = FlutterBluePlus.onScanResults.listen((results) {
       for (final r in results) {
@@ -91,48 +140,141 @@ class PrinterConnectionService extends ChangeNotifier {
         final name = r.device.platformName.isNotEmpty
             ? r.device.platformName
             : r.advertisementData.advName;
+        if (name.isEmpty) continue;
         scans[id] = ScannedPrinter(
-          device: r.device,
+          id: id,
+          name: name,
           rssi: r.rssi,
           likely: isLikelyPrinter(name),
+          kind: PrinterLinkKind.ble,
+          bleDevice: r.device,
         );
       }
       notifyListeners();
     });
-    await FlutterBluePlus.startScan(
-      timeout: const Duration(seconds: 8),
-      androidUsesFineLocation: false,
-    );
-    if (FlutterBluePlus.isScanningNow) {
-      await FlutterBluePlus.isScanning.where((v) => v == false).first;
-    }
-    state = device?.isConnected == true
-        ? PrinterLinkState.connected
-        : PrinterLinkState.idle;
-    statusText = scans.isEmpty ? 'Принтеры не найдены' : 'Выберите устройство';
+    try {
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: 8),
+        androidUsesFineLocation: true,
+      );
+      if (FlutterBluePlus.isScanningNow) {
+        await FlutterBluePlus.isScanning.where((v) => v == false).first;
+      }
+    } catch (_) {}
+
+    state = isConnected ? PrinterLinkState.connected : PrinterLinkState.idle;
+    statusText = scans.isEmpty
+        ? 'Принтеры не найдены. Сначала спарьте XP-365B в настройках Android.'
+        : 'Выберите устройство';
     notifyListeners();
   }
 
-  Future<void> stopScan() async {
-    await FlutterBluePlus.stopScan();
+  void _addClassic(BtcDevice device) {
+    final name = device.displayName;
+    scans[device.address] = ScannedPrinter(
+      id: device.address,
+      name: name,
+      rssi: device.rssi ?? -100,
+      likely: isLikelyPrinter(name),
+      kind: PrinterLinkKind.classic,
+    );
+  }
+
+  Future<void> stopScan({bool keepState = false}) async {
+    try {
+      await FlutterBluePlus.stopScan();
+    } catch (_) {}
     await _scanSub?.cancel();
     _scanSub = null;
+    if (!keepState && state == PrinterLinkState.scanning) {
+      state = PrinterLinkState.idle;
+      notifyListeners();
+    }
   }
 
-  Future<void> connect(BluetoothDevice target) async {
+  Future<void> connectScanned(ScannedPrinter target) async {
     await stopScan();
+    if (target.kind == PrinterLinkKind.classic) {
+      await _connectClassic(target.id, target.name);
+    } else {
+      final ble = target.bleDevice;
+      if (ble == null) {
+        statusText = 'Нет BLE-устройства';
+        notifyListeners();
+        return;
+      }
+      await _connectBle(ble);
+    }
+  }
+
+  Future<void> _connectClassic(String address, String name) async {
     state = PrinterLinkState.connecting;
-    statusText = 'Подключение…';
+    statusText = 'Подключение по Bluetooth…';
     notifyListeners();
     try {
+      await _dropClassic();
+      final conn = await _classic.connect(
+        address: address,
+        uuid: BtcUuid.spp,
+        timeout: const Duration(seconds: 20),
+      );
+      _classicConn = conn;
+      _writeChar = null;
+      device = null;
+      connectedId = address;
+      connectedName = name;
+      connectedKind = PrinterLinkKind.classic;
+      profile = PrinterProfile.forName(name);
+      await _classicStateSub?.cancel();
+      _classicStateSub = conn.stateStream.listen((s) {
+        if (_suppressDrop) return;
+        if (s == BtcConnectionState.disconnected) {
+          state = PrinterLinkState.disconnected;
+          statusText = 'Соединение потеряно, переподключаюсь…';
+          notifyListeners();
+          _reconnect();
+        }
+      });
+      await _prefs.setString(kPrefsPrinterId, address);
+      await _prefs.setString(kPrefsPrinterName, name);
+      await _prefs.setString(kPrefsPrinterKind, PrinterLinkKind.classic.name);
+      await savedPrinters?.remember(
+        address: address,
+        kind: PrinterLinkKind.classic,
+        deviceName: name,
+      );
+      state = PrinterLinkState.connected;
+      statusText = 'Подключено: $name';
+      notifyListeners();
+    } catch (e) {
+      state = PrinterLinkState.disconnected;
+      statusText = 'Не удалось подключиться: $e';
+      notifyListeners();
+    }
+  }
+
+  Future<void> _connectBle(BluetoothDevice target) async {
+    state = PrinterLinkState.connecting;
+    statusText = 'Подключение по BLE…';
+    notifyListeners();
+    try {
+      await _dropClassic();
       await target.connect(
         license: License.nonprofit,
         timeout: const Duration(seconds: 20),
       );
       device = target;
       await _bindWriteCharacteristic(target);
+      final name = target.platformName.isNotEmpty
+          ? target.platformName
+          : target.remoteId.str;
+      connectedId = target.remoteId.str;
+      connectedName = name;
+      connectedKind = PrinterLinkKind.ble;
+      profile = PrinterProfile.forName(name);
       await _connSub?.cancel();
       _connSub = target.connectionState.listen((s) {
+        if (_suppressDrop) return;
         if (s == BluetoothConnectionState.disconnected) {
           state = PrinterLinkState.disconnected;
           statusText = 'Соединение потеряно, переподключаюсь…';
@@ -142,10 +284,13 @@ class PrinterConnectionService extends ChangeNotifier {
         }
       });
       await _prefs.setString(kPrefsPrinterId, target.remoteId.str);
-      final name = target.platformName.isNotEmpty
-          ? target.platformName
-          : target.remoteId.str;
       await _prefs.setString(kPrefsPrinterName, name);
+      await _prefs.setString(kPrefsPrinterKind, PrinterLinkKind.ble.name);
+      await savedPrinters?.remember(
+        address: target.remoteId.str,
+        kind: PrinterLinkKind.ble,
+        deviceName: name,
+      );
       state = PrinterLinkState.connected;
       statusText = 'Подключено: $name';
       notifyListeners();
@@ -162,8 +307,12 @@ class PrinterConnectionService extends ChangeNotifier {
     try {
       final ok = await requestPermissions();
       if (!ok) return;
+      if (savedKind == PrinterLinkKind.classic && Platform.isAndroid) {
+        await _connectClassic(id, savedName ?? id);
+        return;
+      }
       final target = BluetoothDevice.fromId(id);
-      await connect(target);
+      await _connectBle(target);
     } catch (e) {
       statusText = 'Автоподключение не удалось: $e';
       notifyListeners();
@@ -171,22 +320,25 @@ class PrinterConnectionService extends ChangeNotifier {
   }
 
   Future<void> _reconnect() async {
-    final current = device;
-    if (current == null) return;
+    final id = connectedId;
+    final kind = connectedKind;
+    if (id == null || kind == null) return;
+    _suppressDrop = true;
     for (var i = 0; i < 3; i++) {
       await Future<void>.delayed(Duration(seconds: 2 + i));
       try {
-        await current.connect(
-          license: License.nonprofit,
-          timeout: const Duration(seconds: 15),
-        );
-        await _bindWriteCharacteristic(current);
-        state = PrinterLinkState.connected;
-        statusText = 'Снова подключено';
-        notifyListeners();
-        return;
+        if (kind == PrinterLinkKind.classic) {
+          await _connectClassic(id, connectedName ?? id);
+        } else if (device != null) {
+          await _connectBle(device!);
+        }
+        if (isConnected) {
+          _suppressDrop = false;
+          return;
+        }
       } catch (_) {}
     }
+    _suppressDrop = false;
     statusText = 'Не удалось переподключиться';
     notifyListeners();
   }
@@ -198,7 +350,7 @@ class PrinterConnectionService extends ChangeNotifier {
 
   Future<void> _bindWriteCharacteristic(BluetoothDevice target) async {
     final services = await target.discoverServices();
-    for (final candidate in PrinterProfile.candidates) {
+    for (final candidate in PrinterProfile.bleCandidates) {
       for (final service in services) {
         final matchService = candidate.serviceUuids.any(
           (id) => _uuidEq(service.uuid, id),
@@ -207,7 +359,6 @@ class PrinterConnectionService extends ChangeNotifier {
         for (final c in service.characteristics) {
           if (_uuidEq(c.uuid, candidate.writeUuid)) {
             _writeChar = c;
-            profile = candidate;
             if (candidate.notifyUuid != null) {
               for (final n in service.characteristics) {
                 if (_uuidEq(n.uuid, candidate.notifyUuid!)) {
@@ -222,12 +373,10 @@ class PrinterConnectionService extends ChangeNotifier {
         }
       }
     }
-    // Last resort: first writable characteristic.
     for (final service in services) {
       for (final c in service.characteristics) {
         if (c.properties.write || c.properties.writeWithoutResponse) {
           _writeChar = c;
-          profile = PrinterProfile.pt210;
           return;
         }
       }
@@ -236,25 +385,49 @@ class PrinterConnectionService extends ChangeNotifier {
   }
 
   Future<void> writeBytes(List<int> data) async {
-    final char = _writeChar;
-    if (char == null || !isConnected) {
+    if (!isConnected) {
       throw StateError('Принтер не подключён');
     }
     final bytes = data is Uint8List ? data : Uint8List.fromList(data);
-    final size = (profile ?? PrinterProfile.pt210).chunkBytes;
-    final pause = (profile ?? PrinterProfile.pt210).chunkPause;
+    final active = profile ?? PrinterProfile.xp365b;
+    final size = active.chunkBytes;
+    final pause = active.chunkPause;
     for (var offset = 0; offset < bytes.length; offset += size) {
       final end = (offset + size > bytes.length) ? bytes.length : offset + size;
-      await char.write(bytes.sublist(offset, end), withoutResponse: false);
+      final chunk = bytes.sublist(offset, end);
+      final classic = _classicConn;
+      if (classic != null) {
+        await classic.output.add(chunk);
+      } else {
+        final char = _writeChar;
+        if (char == null) throw StateError('Принтер не подключён');
+        await char.write(chunk, withoutResponse: false);
+      }
       if (pause > Duration.zero) {
         await Future<void>.delayed(pause);
       }
     }
   }
 
+  Future<void> _dropClassic() async {
+    await _classicStateSub?.cancel();
+    _classicStateSub = null;
+    final conn = _classicConn;
+    _classicConn = null;
+    if (conn != null) {
+      try {
+        await conn.close();
+      } catch (_) {}
+      try {
+        conn.dispose();
+      } catch (_) {}
+    }
+  }
+
   Future<void> disconnect() async {
     await _connSub?.cancel();
     _connSub = null;
+    await _dropClassic();
     try {
       await device?.disconnect();
     } catch (_) {}
@@ -264,12 +437,39 @@ class PrinterConnectionService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> connectSaved(SavedPrinter printer) async {
+    if (printer.kind == PrinterLinkKind.classic) {
+      await _connectClassic(printer.address, printer.customName);
+      return;
+    }
+    await _connectBle(BluetoothDevice.fromId(printer.address));
+  }
+
+  Future<void> forgetSaved(String address) async {
+    await savedPrinters?.forget(address);
+    if (savedId == address) await forget();
+    notifyListeners();
+  }
+
+  Future<void> renameSaved(String address, String name) async {
+    await savedPrinters?.rename(address, name);
+    if (savedId == address) {
+      await _prefs.setString(kPrefsPrinterName, name);
+      connectedName = name;
+    }
+    notifyListeners();
+  }
+
   Future<void> forget() async {
     await disconnect();
     await _prefs.remove(kPrefsPrinterId);
     await _prefs.remove(kPrefsPrinterName);
+    await _prefs.remove(kPrefsPrinterKind);
     device = null;
     profile = null;
+    connectedId = null;
+    connectedName = null;
+    connectedKind = null;
     state = PrinterLinkState.idle;
     statusText = 'Принтер забыт';
     notifyListeners();
@@ -279,6 +479,7 @@ class PrinterConnectionService extends ChangeNotifier {
   void dispose() {
     _scanSub?.cancel();
     _connSub?.cancel();
+    _classicStateSub?.cancel();
     super.dispose();
   }
 }

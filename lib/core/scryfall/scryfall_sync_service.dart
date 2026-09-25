@@ -109,6 +109,11 @@ class ScryfallSyncService extends ChangeNotifier {
   SyncProgress get progress => _progress;
   bool get isPaused => _paused;
 
+  Future<void> loadStoredCount() async {
+    final count = await _repository.count();
+    _emit(_progress.copyWith(creatureCount: count));
+  }
+
   var _paused = false;
   var _cancel = false;
   Completer<void>? _pauseGate;
@@ -158,11 +163,14 @@ class ScryfallSyncService extends ChangeNotifier {
         kMetaCreatureCount,
         (await _repository.count()).toString(),
       );
+      final missed = _progress.artsFailed;
       _emit(
         _progress.copyWith(
           phase: SyncPhase.done,
-          message: 'Готово',
-          artsFailed: _progress.artsFailed,
+          message: missed > 0
+              ? 'Готово. Не скачалось изображений: $missed'
+              : 'Готово',
+          artsFailed: missed,
         ),
       );
     } catch (e) {
@@ -288,29 +296,36 @@ class ScryfallSyncService extends ChangeNotifier {
   }
 
   Future<void> _syncArts() async {
-    final jobs = await _repository.artJobs();
-    final missing = <({String id, String url})>[];
+    final jobs = await _repository.imageJobs();
+    final missing = <({String id, String url, bool display})>[];
     var done = 0;
     for (final job in jobs) {
-      if (await _artCache.hasArt(job.id)) {
+      final printUrl = job.printUrl;
+      if (printUrl == null || printUrl.isEmpty || await _artCache.hasArt(job.id)) {
         done++;
-      } else if (job.url != null && job.url!.isNotEmpty) {
-        missing.add((id: job.id, url: job.url!));
       } else {
+        missing.add((id: job.id, url: printUrl, display: false));
+      }
+      final displayUrl = job.displayUrl;
+      if (displayUrl == null ||
+          displayUrl.isEmpty ||
+          await _artCache.hasDisplay(job.id)) {
         done++;
+      } else {
+        missing.add((id: job.id, url: displayUrl, display: true));
       }
     }
     _emit(
       _progress.copyWith(
         phase: SyncPhase.downloadingArt,
         artsDone: done,
-        artsTotal: jobs.length,
+        artsTotal: jobs.length * 2,
         artsFailed: 0,
         message: 'Качаю арты…',
       ),
     );
 
-    final failed = <({String id, String url})>[];
+    final failed = <({String id, String url, bool display})>[];
     await _downloadPool(missing, failed);
     if (failed.isNotEmpty && !_cancel) {
       _emit(
@@ -320,17 +335,17 @@ class ScryfallSyncService extends ChangeNotifier {
           message: 'Повтор неудачных артов: ${failed.length}',
         ),
       );
-      final still = <({String id, String url})>[];
+      final still = <({String id, String url, bool display})>[];
       await _downloadPool(failed, still);
       _emit(_progress.copyWith(artsFailed: still.length));
     }
   }
 
   Future<void> _downloadPool(
-    List<({String id, String url})> items,
-    List<({String id, String url})> failedOut,
+    List<({String id, String url, bool display})> items,
+    List<({String id, String url, bool display})> failedOut,
   ) async {
-    final queue = List<({String id, String url})>.from(items);
+    final queue = List<({String id, String url, bool display})>.from(items);
     Future<void> worker() async {
       while (queue.isNotEmpty && !_cancel) {
         await _waitIfPaused();
@@ -348,7 +363,11 @@ class ScryfallSyncService extends ChangeNotifier {
           if (bytes == null || bytes.isEmpty) {
             throw StateError('empty art');
           }
-          await _artCache.storeFromBytes(job.id, bytes);
+          if (job.display) {
+            await _artCache.storeDisplayFromBytes(job.id, bytes);
+          } else {
+            await _artCache.storeFromBytes(job.id, bytes);
+          }
           _emit(
             _progress.copyWith(
               artsDone: _progress.artsDone + 1,

@@ -13,6 +13,8 @@ class Creature {
     this.typeLine,
     this.imageUriArtCrop,
     this.imageUriNormal,
+    this.setCode,
+    this.setName,
   });
 
   final String id;
@@ -26,6 +28,8 @@ class Creature {
   final String? typeLine;
   final String? imageUriArtCrop;
   final String? imageUriNormal;
+  final String? setCode;
+  final String? setName;
 
   String get colorsKey => colors.join(',');
 
@@ -46,6 +50,8 @@ class Creature {
     'type_line': typeLine,
     'image_uri_art_crop': imageUriArtCrop,
     'image_uri_normal': imageUriNormal,
+    'set_code': setCode,
+    'set_name': setName,
   };
 
   factory Creature.fromRow(Map<String, Object?> row) {
@@ -72,6 +78,8 @@ class Creature {
       typeLine: row['type_line'] as String?,
       imageUriArtCrop: row['image_uri_art_crop'] as String?,
       imageUriNormal: row['image_uri_normal'] as String?,
+      setCode: row['set_code'] as String?,
+      setName: row['set_name'] as String?,
     );
   }
 

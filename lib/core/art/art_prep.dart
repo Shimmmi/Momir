@@ -12,8 +12,9 @@ img.Image flattenOnWhite(img.Image src) {
 
 /// Floyd–Steinberg to real black/white.
 ///
-/// `image.quantize(..., numberOfColors: 2)` uses an octree and can pick two
-/// dark palette colors, so night-time arts render as a black rectangle.
+/// A fixed threshold of 128 turns night arts into a solid black rectangle:
+/// every pixel sits below the cut, so error diffusion never reaches white.
+/// Stretch the 2nd–98th percentile onto 0…255 before dithering.
 img.Image ditherToBlackWhite(img.Image src, {double gamma = 0.85}) {
   final w = src.width;
   final h = src.height;
@@ -28,6 +29,7 @@ img.Image ditherToBlackWhite(img.Image src, {double gamma = 0.85}) {
       lum[y * w + x] = 255 * math.pow(g / 255.0, gamma).toDouble();
     }
   }
+  _stretchContrast(lum);
 
   final out = img.Image(width: w, height: h, numChannels: 4);
   for (var y = 0; y < h; y++) {
@@ -53,4 +55,19 @@ img.Image ditherToBlackWhite(img.Image src, {double gamma = 0.85}) {
     }
   }
   return out;
+}
+
+/// Maps the 2nd and 98th percentiles onto 0 and 255 so a dark crop still
+/// has both ink and paper after the 128 threshold.
+void _stretchContrast(List<double> lum) {
+  if (lum.length < 8) return;
+  final sorted = List<double>.from(lum)..sort();
+  final lo = sorted[(sorted.length * 0.02).floor()];
+  final hiIndex = (sorted.length * 0.98).floor().clamp(0, sorted.length - 1);
+  final hi = sorted[hiIndex];
+  final span = hi - lo;
+  if (span < 8) return;
+  for (var i = 0; i < lum.length; i++) {
+    lum[i] = ((lum[i] - lo) / span * 255).clamp(0.0, 255.0);
+  }
 }

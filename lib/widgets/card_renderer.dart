@@ -30,7 +30,7 @@ class CardRenderService {
   CardRenderService();
 
   Map<String, ui.Image>? _mana;
-  final _paintWidth = PrinterProfile.pt210.printWidth;
+  final _paintWidth = PrinterProfile.xp365b.printWidth;
 
   Future<void> ensureLoaded() async {
     if (_mana != null) return;

@@ -63,18 +63,31 @@ Uint8List encodeEscPosRaster({
   return out.toBytes();
 }
 
-Uint8List encodeTestPattern({required int width}) {
-  const height = 48;
+/// Full-width ruler. Long ticks every 64 dots, short ticks every 32.
+/// If the right edge is clipped, count the long ticks (576 dots = 9 longs
+/// including the origin, 608 dots = 10).
+Uint8List encodeWidthRuler({required int width}) {
+  const height = 72;
   final bytesPerRow = width ~/ 8;
   final raster = Uint8List(bytesPerRow * height);
-  for (var x = 0; x < width; x++) {
-    raster[x >> 3] |= 0x80 >> (x & 7);
-    final bottom = (height - 1) * bytesPerRow;
-    raster[bottom + (x >> 3)] |= 0x80 >> (x & 7);
+
+  void set(int x, int y) {
+    raster[y * bytesPerRow + (x >> 3)] |= 0x80 >> (x & 7);
   }
-  for (var y = 0; y < height; y++) {
-    raster[y * bytesPerRow] |= 0x80;
-    raster[y * bytesPerRow + bytesPerRow - 1] |= 0x01;
+
+  for (var x = 0; x < width; x++) {
+    set(x, 0);
+    set(x, 1);
+    set(x, height - 2);
+    set(x, height - 1);
+  }
+  for (var x = 0; x < width; x += 32) {
+    final tall = x % 64 == 0;
+    final mark = tall ? 56 : 28;
+    for (var y = 4; y < mark; y++) {
+      set(x, y);
+      if (x + 1 < width) set(x + 1, y);
+    }
   }
   return encodeEscPosRaster(
     raster: raster,

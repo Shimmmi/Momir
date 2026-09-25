@@ -21,80 +21,67 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     final printer = context.watch<PrinterConnectionService>();
     final prints = context.read<PrintService>();
     final renderer = context.read<CardRenderService>();
+    final text = Theme.of(context).textTheme;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Принтер')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Статус'),
-            subtitle: Text(
-              printer.statusText ??
-                  (printer.isConnected ? 'Подключено' : 'Не подключено'),
-            ),
-            trailing: Icon(
-              printer.isConnected ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
-              color: printer.isConnected ? Colors.green : Colors.grey,
-            ),
+          Text(
+            printer.isConnected
+                ? (printer.savedName ?? 'Подключено')
+                : 'Не подключён',
+            style: text.headlineSmall,
           ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Сохранённое устройство'),
-            subtitle: Text(printer.savedName ?? 'нет'),
+          const SizedBox(height: 6),
+          Text(
+            'XP-365B, режим чека. После печати оторвите бумагу.',
+            style: text.bodyMedium,
           ),
-          const SizedBox(height: 8),
-          FilledButton.icon(
+          const SizedBox(height: 20),
+          FilledButton(
             onPressed: () => context.push('/printer/scan'),
-            icon: const Icon(Icons.bluetooth_searching),
-            label: const Text('Сканировать и выбрать'),
+            child: const Text('Найти принтер'),
           ),
           const SizedBox(height: 8),
-          FilledButton.tonalIcon(
+          OutlinedButton(
             onPressed: !printer.isConnected
                 ? null
-                : () async {
-                    setState(() => _testStatus = 'Печатаю тест…');
-                    try {
-                      try {
-                        await prints.printTest();
-                      } catch (_) {
-                        final card = await renderer.renderPlainText(
-                          'Momir test OK',
-                        );
-                        await prints.printCard(card);
-                      }
-                      if (mounted) {
-                        setState(() => _testStatus = 'Тест отправлен');
-                      }
-                    } catch (e) {
-                      if (mounted) {
-                        setState(() => _testStatus = 'Ошибка: $e');
-                      }
-                    }
-                  },
-            icon: const Icon(Icons.qr_code_2),
-            label: const Text('Тестовая печать'),
+                : () => _test(prints, renderer),
+            child: const Text('Тестовая линейка'),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Длинная риска каждые 64 точки. Обрезанный правый край — не та ширина.',
+            style: text.bodySmall,
           ),
           const SizedBox(height: 8),
-          OutlinedButton.icon(
+          TextButton(
             onPressed: printer.savedId == null ? null : printer.forget,
-            icon: const Icon(Icons.link_off),
-            label: const Text('Забыть принтер'),
+            child: const Text('Забыть принтер'),
           ),
           if (_testStatus != null) ...[
-            const SizedBox(height: 16),
-            Text(_testStatus!),
+            const SizedBox(height: 12),
+            Text(_testStatus!, style: text.bodyMedium),
           ],
-          const SizedBox(height: 24),
-          Text(
-            'Goojprt PT-210 печатает без автоножа. После карточки лента '
-            'проматывается — оторвите чек вручную.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
         ],
       ),
     );
+  }
+
+  Future<void> _test(PrintService prints, CardRenderService renderer) async {
+    setState(() => _testStatus = 'Печатаю линейку…');
+    try {
+      try {
+        await prints.printTest();
+      } catch (_) {
+        final card = await renderer.renderPlainText('Momir test OK');
+        await prints.printCard(card);
+      }
+      if (mounted) setState(() => _testStatus = 'Линейка отправлена');
+    } catch (_) {
+      if (mounted) setState(() => _testStatus = 'Печать не прошла. Повторите.');
+    }
   }
 }

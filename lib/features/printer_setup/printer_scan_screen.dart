@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/ble/printer_connection_service.dart';
+import '../../core/ble/printer_profile.dart';
 
 class PrinterScanScreen extends StatefulWidget {
   const PrinterScanScreen({super.key});
@@ -49,12 +50,30 @@ class _PrinterScanScreenState extends State<PrinterScanScreen> {
             padding: const EdgeInsets.all(16),
             child: Text(
               printer.statusText ??
-                  'Разрешите Bluetooth. Устройства с именем PT-210 / Printer выделены.',
+                  'Сначала спарьте XP-365B в настройках Android.',
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
           ),
           Expanded(
             child: devices.isEmpty
-                ? const Center(child: Text('Пока ничего не видно'))
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Пока ничего не видно',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          onPressed: printer.state == PrinterLinkState.scanning
+                              ? null
+                              : printer.startScan,
+                          child: const Text('Искать снова'),
+                        ),
+                      ],
+                    ),
+                  )
                 : ListView.builder(
                     itemCount: devices.length,
                     itemBuilder: (context, i) {
@@ -68,13 +87,19 @@ class _PrinterScanScreenState extends State<PrinterScanScreen> {
                         ),
                         title: Text(d.name),
                         subtitle: Text(
-                          '${d.device.remoteId.str}  ·  ${d.rssi} dBm',
+                          d.kind == PrinterLinkKind.classic
+                              ? 'Bluetooth'
+                              : 'BLE',
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
                         trailing: d.likely
-                            ? const Chip(label: Text('принтер?'))
+                            ? Icon(
+                                Icons.print,
+                                color: Theme.of(context).colorScheme.secondary,
+                              )
                             : null,
                         onTap: () async {
-                          await printer.connect(d.device);
+                          await printer.connectScanned(d);
                           if (context.mounted && printer.isConnected) {
                             context.go('/printer');
                           }

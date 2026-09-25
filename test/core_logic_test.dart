@@ -60,6 +60,29 @@ void main() {
     expect(white, greaterThan(10));
   });
 
+  test('ditherToBlackWhite keeps detail in a dark crop', () {
+    final src = img.Image(width: 64, height: 16, numChannels: 3);
+    for (final p in src) {
+      final v = 10 + (p.x * 30 / 63).round();
+      p
+        ..r = v
+        ..g = v
+        ..b = v;
+    }
+    final bw = ditherToBlackWhite(src);
+    var black = 0;
+    var white = 0;
+    for (final p in bw) {
+      if (p.r < 128) {
+        black++;
+      } else {
+        white++;
+      }
+    }
+    expect(black, greaterThan(20));
+    expect(white, greaterThan(20));
+  });
+
   test('oraclePieces keeps spaces and paragraph breaks', () {
     final pieces = oraclePieces('{T}: Draw a card.\nFlying');
     expect(
@@ -125,6 +148,8 @@ void main() {
       'power': '2',
       'toughness': '2',
       'colors': ['G'],
+      'set': '10e',
+      'set_name': 'Tenth Edition',
       'layout': 'normal',
       'image_uris': {
         'art_crop': 'https://example.com/art.jpg',
@@ -134,6 +159,8 @@ void main() {
     expect(creature?.name, 'Grizzly Bears');
     expect(creature?.cmc, 2);
     expect(creature?.imageUriArtCrop, contains('art.jpg'));
+    expect(creature?.setCode, '10e');
+    expect(creature?.setName, 'Tenth Edition');
 
     expect(
       extractCreature({

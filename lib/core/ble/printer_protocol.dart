@@ -13,7 +13,7 @@ abstract class PrinterProtocolAdapter {
 
 class EscPosAdapter implements PrinterProtocolAdapter {
   EscPosAdapter({PrinterProfile? profile})
-    : profile = profile ?? PrinterProfile.pt210;
+    : profile = profile ?? PrinterProfile.xp365b;
 
   final PrinterProfile profile;
 
@@ -28,7 +28,7 @@ class EscPosAdapter implements PrinterProtocolAdapter {
   }
 
   @override
-  Uint8List encodeTestPrint() => encodeTestPattern(width: profile.printWidth);
+  Uint8List encodeTestPrint() => encodeWidthRuler(width: profile.printWidth);
 }
 
 class CatPrinterAdapter implements PrinterProtocolAdapter {

@@ -19,11 +19,11 @@ class SyncScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('База карт'),
+        title: const Text('Обновление'),
         leading: fromSettings || p.creatureCount > 0
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),
-                onPressed: () => context.go('/home'),
+                onPressed: () => context.go('/menu'),
               )
             : null,
       ),
@@ -31,11 +31,10 @@ class SyncScreen extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         child: ListView(
           children: [
-            const Text(
-              'Нужен Wi‑Fi. Сначала скачивается база существ Scryfall, '
-              'затем все иллюстрации (примерно 150–400 МБ, это может занять '
-              'десятки минут). После этого приложение работает офлайн.',
-              style: TextStyle(height: 1.4),
+            Text(
+              'Один раз по Wi‑Fi: существа Scryfall, затем иллюстрации '
+              '(150–400 МБ). Дальше игра идёт без сети.',
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 20),
             _PhaseTile(
@@ -61,27 +60,40 @@ class SyncScreen extends StatelessWidget {
               Text(p.message!, style: Theme.of(context).textTheme.bodyMedium),
             if (p.error != null) ...[
               const SizedBox(height: 8),
-              Text(p.error!, style: const TextStyle(color: Colors.redAccent)),
+              Text(
+                p.error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ],
             const SizedBox(height: 24),
-            if (!running)
-              FilledButton.icon(
+            if (!running) ...[
+              if (p.creatureCount > 0)
+                FilledButton(
+                  onPressed: () => context.go('/menu'),
+                  child: const Text('В меню'),
+                ),
+              if (p.creatureCount > 0) const SizedBox(height: 8),
+              OutlinedButton(
                 onPressed: () => sync.sync(replaceCards: true),
-                icon: const Icon(Icons.download),
-                label: Text(
+                child: Text(
                   p.creatureCount == 0
                       ? 'Скачать базу карт'
-                      : 'Обновить базу карт',
+                      : 'Обновить карты',
                 ),
               ),
-            if (running) ...[
+              if (p.creatureCount > 0) ...[
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: sync.retryFailedArts,
+                  child: const Text('Докачать изображения'),
+                ),
+              ],
+            ],
+            if (running &&
+                (p.phase == SyncPhase.downloadingArt ||
+                    p.phase == SyncPhase.retryingArt)) ...[
               FilledButton.tonal(
-                onPressed: p.phase == SyncPhase.downloadingArt ||
-                        p.phase == SyncPhase.retryingArt
-                    ? (sync.isPaused
-                          ? sync.resumeDownloads
-                          : sync.pause)
-                    : null,
+                onPressed: sync.isPaused ? sync.resumeDownloads : sync.pause,
                 child: Text(sync.isPaused ? 'Продолжить' : 'Пауза'),
               ),
               const SizedBox(height: 8),
@@ -89,24 +101,10 @@ class SyncScreen extends StatelessWidget {
                 OutlinedButton(
                   onPressed: () {
                     sync.playInBackground();
-                    context.go('/home');
+                    context.go('/menu');
                   },
                   child: const Text('Играть, арты докачаются'),
                 ),
-            ],
-            if (p.phase == SyncPhase.done) ...[
-              const SizedBox(height: 12),
-              FilledButton(
-                onPressed: () => context.go('/home'),
-                child: const Text('К игре'),
-              ),
-            ],
-            if (p.phase == SyncPhase.error) ...[
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: () => sync.sync(replaceCards: p.creatureCount == 0),
-                child: const Text('Повторить'),
-              ),
             ],
             const SizedBox(height: 24),
             FutureBuilder(

@@ -75,5 +75,7 @@ Creature? extractCreature(Map<String, dynamic> card) {
     typeLine: typeLine,
     imageUriArtCrop: _imageUri(face, 'art_crop') ?? _imageUri(card, 'art_crop'),
     imageUriNormal: _imageUri(face, 'normal') ?? _imageUri(card, 'normal'),
+    setCode: card['set'] as String?,
+    setName: card['set_name'] as String?,
   );
 }
