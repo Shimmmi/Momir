@@ -24,7 +24,13 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     final text = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Принтер')),
+      appBar: AppBar(
+        title: const Text('Принтер'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.go('/menu'),
+        ),
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
@@ -36,7 +42,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'XP-365B, режим чека. После печати оторвите бумагу.',
+            'XP-365B, лента 57 мм. После печати оторвите бумагу.',
             style: text.bodyMedium,
           ),
           const SizedBox(height: 20),

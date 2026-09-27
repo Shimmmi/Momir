@@ -11,8 +11,14 @@ const kPrefsColorFilter = 'color_filter';
 const kPrefsLastSyncIso = 'last_sync_iso';
 const kMetaLastSync = 'last_sync_iso';
 const kMetaCreatureCount = 'creature_count';
-const kArtWidth = 576;
-const kArtHeight = 300;
+const kArtWidth = 384;
+
+/// Real Magic card is 63.5 × 88.9 mm. On a 57 mm roll the whole receipt
+/// (art and text) scales to 57 × 88.9 / 63.5 ≈ 79.8 mm, 638 dots at 203 dpi.
+const kPrintCardHeight = 638;
+
+/// Art window is about 39.9 mm of the 88.9 mm card, so the rules text still fits.
+const kArtHeight = 286;
 const kArtJpegQuality = 60;
 const kDisplayMaxWidth = 750;
 const kDisplayJpegQuality = 80;

@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:momir/core/art/art_prep.dart';
 import 'package:momir/core/ble/escpos_encoder.dart';
+import 'package:momir/core/ble/tspl_encoder.dart';
 import 'package:momir/core/mana/mana_cost_parser.dart';
 import 'package:momir/core/scryfall/bulk_uri.dart';
 import 'package:momir/core/scryfall/card_extractor.dart';
@@ -137,6 +138,22 @@ void main() {
     expect(bytes.last, 0x0a);
   });
 
+  test('encodeTsplBitmap uses 48-byte rows for 57 mm paper', () {
+    const width = 384;
+    const height = 8;
+    final bytes = encodeTsplBitmap(
+      raster: Uint8List(width ~/ 8 * height),
+      width: width,
+      height: height,
+    );
+    final text = String.fromCharCodes(bytes.take(80));
+    expect(text, contains('SIZE 48 mm'));
+    expect(text, contains('BITMAP 0,0,48,8,0,'));
+    final marker = ascii.encode('BITMAP 0,0,48,8,0,');
+    final start = _indexOf(bytes, marker) + marker.length;
+    expect(bytes[start], 0xff);
+  });
+
   test('extractCreature keeps creatures and skips tokens', () {
     final creature = extractCreature({
       'id': 'abc',
@@ -251,4 +268,18 @@ void main() {
     expect(items.first['name'], 'A');
     await dir.delete(recursive: true);
   });
+}
+
+int _indexOf(Uint8List data, List<int> needle) {
+  for (var i = 0; i <= data.length - needle.length; i++) {
+    var found = true;
+    for (var j = 0; j < needle.length; j++) {
+      if (data[i + j] != needle[j]) {
+        found = false;
+        break;
+      }
+    }
+    if (found) return i;
+  }
+  return -1;
 }

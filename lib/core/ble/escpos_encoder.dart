@@ -63,10 +63,8 @@ Uint8List encodeEscPosRaster({
   return out.toBytes();
 }
 
-/// Full-width ruler. Long ticks every 64 dots, short ticks every 32.
-/// If the right edge is clipped, count the long ticks (576 dots = 9 longs
-/// including the origin, 608 dots = 10).
-Uint8List encodeWidthRuler({required int width}) {
+/// Full-width ruler raster. Long ticks every 64 dots, short ticks every 32.
+Uint8List widthRulerRaster({required int width}) {
   const height = 72;
   final bytesPerRow = width ~/ 8;
   final raster = Uint8List(bytesPerRow * height);
@@ -89,8 +87,13 @@ Uint8List encodeWidthRuler({required int width}) {
       if (x + 1 < width) set(x + 1, y);
     }
   }
+  return raster;
+}
+
+Uint8List encodeWidthRuler({required int width}) {
+  const height = 72;
   return encodeEscPosRaster(
-    raster: raster,
+    raster: widthRulerRaster(width: width),
     width: width,
     height: height,
     feedLines: 8,

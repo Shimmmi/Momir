@@ -31,15 +31,14 @@ class PrinterProfile {
   final int feedLines;
   final List<String> nameHints;
 
-  /// 80 mm Xprinter. 576 dots is the safe 203 dpi width; a ruler print
-  /// shows whether the head is actually 576 or 608.
+  /// 57 mm roll. Printable width is 48 mm, 384 dots at 203 dpi.
   static final xp365b = PrinterProfile(
     id: 'xp365b',
     name: 'Xprinter XP-365B',
     kind: PrinterLinkKind.classic,
     serviceUuids: const [],
     writeUuid: '',
-    printWidth: 576,
+    printWidth: 384,
     chunkBytes: 512,
     chunkPause: const Duration(milliseconds: 8),
     feedLines: kFeedLines,

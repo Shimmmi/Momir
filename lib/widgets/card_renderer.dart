@@ -164,12 +164,6 @@ class CardRenderService {
       ellipsis: '…',
     )..layout(maxWidth: contentW);
 
-    final oracleHeight = _measureOracle(
-      creature.oracleText,
-      contentW,
-      kMaxOracleHeight,
-    );
-
     final pt = [
       creature.power,
       creature.toughness,
@@ -187,17 +181,32 @@ class CardRenderService {
       textDirection: TextDirection.ltr,
     )..layout(maxWidth: contentW);
 
-    var y = pad;
-    y += headerH + 6;
-    y += 2 + 6; // line
-    final artH = art != null ? kArtHeight.toDouble() : 72.0;
-    y += artH + 6;
-    y += typePainter.height + 6;
-    y += 2 + 6;
-    y += oracleHeight + 8;
-    y += 2 + 6;
-    y += (ptPainter.height) + pad;
-    final height = y.ceil().clamp(120, 4000);
+    var artH = kArtHeight.toDouble();
+    double chrome(double artBox) =>
+        pad +
+        headerH +
+        6 +
+        8 +
+        artBox +
+        6 +
+        typePainter.height +
+        6 +
+        8 +
+        8 +
+        8 +
+        ptPainter.height +
+        pad;
+    var oracleBudget = kPrintCardHeight - chrome(artH);
+    if (oracleBudget < 48) {
+      artH = (artH + oracleBudget - 48).clamp(96.0, kArtHeight.toDouble());
+      oracleBudget = (kPrintCardHeight - chrome(artH)).clamp(24.0, kMaxOracleHeight);
+    }
+    final oracleHeight = _measureOracle(
+      creature.oracleText,
+      contentW,
+      oracleBudget,
+    );
+    final height = kPrintCardHeight;
 
     return _rasterize(_paintWidth, height, (canvas) {
       canvas.drawRect(

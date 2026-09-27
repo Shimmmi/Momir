@@ -8,7 +8,7 @@ class PrintService {
   PrintService({
     required this._connection,
     PrinterProtocolAdapter? adapter,
-  }) : _adapter = adapter ?? EscPosAdapter();
+  }) : _adapter = adapter ?? TsplAdapter();
 
   final PrinterConnectionService _connection;
   final PrinterProtocolAdapter _adapter;
