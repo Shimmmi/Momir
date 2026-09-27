@@ -24,6 +24,10 @@ void main() {
     ]);
     expect(spans.any((s) => s.text?.contains('Draw a card') == true), isTrue);
     expect(manaAssetPath('W/U'), 'assets/mana/W_U.png');
+    expect(isGenericMana('2'), isTrue);
+    expect(isGenericMana('X'), isTrue);
+    expect(isGenericMana('W'), isFalse);
+    expect(isGenericMana('W/U'), isFalse);
   });
 
   test('flattenOnWhite composites transparent pixels onto white', () {

@@ -302,10 +302,38 @@ class CardRenderService {
 
   void _paintSymbol(Canvas canvas, String code, Offset origin, double size) {
     final icon = _mana?[code] ?? _mana?[code.replaceAll('/', '_')];
+    final rect = Rect.fromLTWH(origin.dx, origin.dy, size, size);
+    if (icon != null && isGenericMana(code)) {
+      final center = rect.center;
+      final radius = size / 2;
+      final ring = (size * 0.1).clamp(1.0, 2.5);
+      canvas.drawCircle(center, radius, Paint()..color = Colors.black);
+      canvas.drawCircle(
+        center,
+        radius - ring,
+        Paint()..color = Colors.white,
+      );
+      canvas.save();
+      canvas.clipPath(Path()..addOval(rect.deflate(ring)));
+      paintImage(
+        canvas: canvas,
+        rect: rect,
+        image: icon,
+        filterQuality: FilterQuality.none,
+        colorFilter: const ColorFilter.matrix(<double>[
+          -1, 0, 0, 0, 255,
+          0, -1, 0, 0, 255,
+          0, 0, -1, 0, 255,
+          0, 0, 0, 1, 0,
+        ]),
+      );
+      canvas.restore();
+      return;
+    }
     if (icon != null) {
       paintImage(
         canvas: canvas,
-        rect: Rect.fromLTWH(origin.dx, origin.dy, size, size),
+        rect: rect,
         image: icon,
         filterQuality: FilterQuality.none,
       );

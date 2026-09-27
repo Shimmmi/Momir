@@ -82,6 +82,11 @@ List<OraclePiece> oraclePieces(String? input) {
   return pieces;
 }
 
+final _genericMana = RegExp(r'^(?:\d+|X|Y|Z|1/2)$', caseSensitive: false);
+
+/// Numeric generic mana: a circle with a digit, not a colored symbol.
+bool isGenericMana(String code) => _genericMana.hasMatch(code);
+
 String manaAssetPath(String code) {
   final file = code.replaceAll('/', '_');
   return 'assets/mana/$file.png';
