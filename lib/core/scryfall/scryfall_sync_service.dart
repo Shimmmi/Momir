@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -13,9 +14,11 @@ import '../art/art_download_guard.dart';
 import '../constants.dart';
 import '../db/creature_repository.dart';
 import '../db/database.dart';
+import '../game_mode.dart';
 import 'bulk_uri.dart';
 import 'card_extractor.dart';
 import 'json_array_reader.dart';
+import 'sync_error.dart';
 
 enum SyncPhase {
   idle,
@@ -32,6 +35,7 @@ class SyncProgress {
   const SyncProgress({
     this.phase = SyncPhase.idle,
     this.creatureCount = 0,
+    this.typeCounts = const {},
     this.artsDone = 0,
     this.artsTotal = 0,
     this.artsFailed = 0,
@@ -43,6 +47,7 @@ class SyncProgress {
 
   final SyncPhase phase;
   final int creatureCount;
+  final Map<GameMode, int> typeCounts;
   final int artsDone;
   final int artsTotal;
   final int artsFailed;
@@ -50,6 +55,8 @@ class SyncProgress {
   final String? message;
   final String? error;
   final bool background;
+
+  int countOf(GameMode mode) => typeCounts[mode] ?? 0;
 
   bool get isRunning =>
       phase != SyncPhase.idle &&
@@ -59,6 +66,7 @@ class SyncProgress {
   SyncProgress copyWith({
     SyncPhase? phase,
     int? creatureCount,
+    Map<GameMode, int>? typeCounts,
     int? artsDone,
     int? artsTotal,
     int? artsFailed,
@@ -71,6 +79,7 @@ class SyncProgress {
     return SyncProgress(
       phase: phase ?? this.phase,
       creatureCount: creatureCount ?? this.creatureCount,
+      typeCounts: typeCounts ?? this.typeCounts,
       artsDone: artsDone ?? this.artsDone,
       artsTotal: artsTotal ?? this.artsTotal,
       artsFailed: artsFailed ?? this.artsFailed,
@@ -88,18 +97,7 @@ class ScryfallSyncService extends ChangeNotifier {
     required this._repository,
     required this._artCache,
     Dio? dio,
-  }) : _dio =
-           dio ??
-           Dio(
-             BaseOptions(
-               headers: {
-                 'User-Agent': kScryfallUserAgent,
-                 'Accept': 'application/json, */*',
-               },
-               connectTimeout: const Duration(seconds: 30),
-               receiveTimeout: const Duration(minutes: 10),
-             ),
-           );
+  }) : _dio = dio ?? createScryfallDio();
 
   final AppDatabase _database;
   final CreatureRepository _repository;
@@ -109,10 +107,12 @@ class ScryfallSyncService extends ChangeNotifier {
   SyncProgress _progress = const SyncProgress();
   SyncProgress get progress => _progress;
   bool get isPaused => _paused;
+  Set<GameMode> _selected = Set.of(GameMode.values);
 
   Future<void> loadStoredCount() async {
     final count = await _repository.count();
-    _emit(_progress.copyWith(creatureCount: count));
+    final counts = await _repository.countsByMode();
+    _emit(_progress.copyWith(creatureCount: count, typeCounts: counts));
   }
 
   var _paused = false;
@@ -140,24 +140,39 @@ class ScryfallSyncService extends ChangeNotifier {
   }
 
   void playInBackground() {
-    _emit(_progress.copyWith(background: true, message: 'Докачка артов в фоне'));
+    _emit(
+      _progress.copyWith(background: true, message: 'Докачка артов в фоне'),
+    );
   }
 
   Future<void> _waitIfPaused() async {
     while (_paused && !_cancel) {
-      await (_pauseGate?.future ?? Future<void>.delayed(const Duration(milliseconds: 200)));
+      await (_pauseGate?.future ??
+          Future<void>.delayed(const Duration(milliseconds: 200)));
     }
   }
 
-  Future<void> sync({bool replaceCards = true}) async {
+  Future<void> sync({bool replaceCards = true, Set<GameMode>? modes}) async {
     _cancel = false;
     _paused = false;
+    _selected = (modes == null || modes.isEmpty)
+        ? Set.of(GameMode.values)
+        : Set.of(modes);
+    await _database.setMeta(kMetaSyncModes, GameMode.encode(_selected));
     try {
       if (replaceCards) {
         await _syncCards();
       } else {
         final count = await _repository.count();
-        _emit(_progress.copyWith(phase: SyncPhase.downloadingArt, creatureCount: count));
+        final counts = await _repository.countsByMode();
+        _emit(
+          _progress.copyWith(
+            phase: SyncPhase.downloadingArt,
+            creatureCount: count,
+            typeCounts: counts,
+            clearError: true,
+          ),
+        );
       }
       try {
         await _syncArts();
@@ -166,14 +181,15 @@ class ScryfallSyncService extends ChangeNotifier {
       }
       await _artCache.pruneOrphans(await _repository.allIds());
       await _database.setMeta(kMetaLastSync, DateTime.now().toIso8601String());
-      await _database.setMeta(
-        kMetaCreatureCount,
-        (await _repository.count()).toString(),
-      );
+      final total = await _repository.count();
+      final counts = await _repository.countsByMode();
+      await _database.setMeta(kMetaCreatureCount, total.toString());
       final missed = _progress.artsFailed;
       _emit(
         _progress.copyWith(
           phase: SyncPhase.done,
+          creatureCount: total,
+          typeCounts: counts,
           message: missed > 0
               ? 'Готово. Не скачалось изображений: $missed'
               : 'Готово',
@@ -184,25 +200,29 @@ class ScryfallSyncService extends ChangeNotifier {
       _emit(
         _progress.copyWith(
           phase: SyncPhase.error,
-          error: e.toString(),
+          error: syncErrorMessage(e),
           message: 'Ошибка синхронизации',
         ),
       );
     }
   }
 
-  Future<void> retryFailedArts() => sync(replaceCards: false);
+  Future<void> retryFailedArts({Set<GameMode>? modes}) =>
+      sync(replaceCards: false, modes: modes);
 
   Future<void> _syncCards() async {
     _emit(
-      const SyncProgress(
+      _progress.copyWith(
         phase: SyncPhase.fetchingIndex,
         message: 'Запрашиваю индекс Scryfall…',
+        clearError: true,
       ),
     );
     Map<String, dynamic>? oracle;
     try {
-      final direct = await _dio.get<dynamic>(kOracleCardsUrl);
+      final direct = await _retry(
+        () => _dio.get<dynamic>(kOracleCardsUrl, options: _jsonOptions),
+      );
       oracle = _asJsonMap(direct.data);
       if (oracle['type'] != 'oracle_cards' && oracle['object'] != 'bulk_data') {
         oracle = null;
@@ -211,7 +231,9 @@ class ScryfallSyncService extends ChangeNotifier {
       oracle = null;
     }
     if (oracle == null) {
-      final index = await _dio.get<dynamic>(kBulkDataUrl);
+      final index = await _retry(
+        () => _dio.get<dynamic>(kBulkDataUrl, options: _jsonOptions),
+      );
       final root = _asJsonMap(index.data);
       final data = root['data'] as List<dynamic>? ?? const [];
       for (final raw in data) {
@@ -240,30 +262,40 @@ class ScryfallSyncService extends ChangeNotifier {
         bulkFraction: 0,
       ),
     );
-    await _dio.download(
-      uri,
-      bulkFile.path,
-      onReceiveProgress: (received, total) {
-        if (total > 0) {
-          _emit(
-            _progress.copyWith(
-              bulkFraction: received / total,
-              message:
-                  'Скачиваю базу карт… ${(received / (1024 * 1024)).toStringAsFixed(1)} МБ',
-            ),
-          );
-        }
-      },
-    );
+    await _retry(() async {
+      if (await bulkFile.exists()) {
+        await bulkFile.delete();
+      }
+      await _dio.download(
+        uri,
+        bulkFile.path,
+        deleteOnError: true,
+        options: Options(
+          connectTimeout: const Duration(seconds: 60),
+          receiveTimeout: const Duration(minutes: 20),
+        ),
+        onReceiveProgress: (received, total) {
+          if (total > 0) {
+            _emit(
+              _progress.copyWith(
+                bulkFraction: received / total,
+                message:
+                    'Скачиваю базу карт… ${(received / (1024 * 1024)).toStringAsFixed(1)} МБ',
+              ),
+            );
+          }
+        },
+      );
+    });
 
     _emit(
       _progress.copyWith(
         phase: SyncPhase.parsing,
-        message: 'Разбираю существ…',
+        message: 'Разбираю карты…',
         bulkFraction: 1,
       ),
     );
-    await _repository.clearCreatures();
+    await _repository.deleteByModes(_selected);
     var inserted = 0;
     var batch = <Creature>[];
     await for (final card in readBulkCardObjects(
@@ -272,7 +304,7 @@ class ScryfallSyncService extends ChangeNotifier {
       jsonl: isJsonlUri(uri),
     )) {
       final creature = extractCreature(card);
-      if (creature == null) continue;
+      if (creature == null || !creature.matchesAny(_selected)) continue;
       batch.add(creature);
       if (batch.length >= 500) {
         await _repository.replaceAll(batch);
@@ -281,7 +313,7 @@ class ScryfallSyncService extends ChangeNotifier {
         _emit(
           _progress.copyWith(
             creatureCount: inserted,
-            message: 'Записано существ: $inserted',
+            message: 'Записано карт: $inserted',
           ),
         );
         await Future<void>.delayed(Duration.zero);
@@ -294,7 +326,7 @@ class ScryfallSyncService extends ChangeNotifier {
     _emit(
       _progress.copyWith(
         creatureCount: inserted,
-        message: 'Карт в базе: $inserted',
+        message: 'Записано карт: $inserted',
       ),
     );
     try {
@@ -302,13 +334,35 @@ class ScryfallSyncService extends ChangeNotifier {
     } catch (_) {}
   }
 
+  Future<T> _retry<T>(Future<T> Function() action) async {
+    const attempts = 3;
+    Object? last;
+    for (var i = 0; i < attempts; i++) {
+      try {
+        return await action();
+      } catch (e) {
+        last = e;
+        if (!isRetryableSyncError(e) || i == attempts - 1) rethrow;
+        _emit(
+          _progress.copyWith(
+            message: 'Нет ответа от Scryfall, повтор ${i + 2} из $attempts…',
+          ),
+        );
+        await Future<void>.delayed(Duration(seconds: 2 * (i + 1)));
+      }
+    }
+    throw last!;
+  }
+
   Future<void> _syncArts() async {
-    final jobs = await _repository.imageJobs();
+    final jobs = await _repository.imageJobs(modes: _selected);
     final missing = <({String id, String url, bool display})>[];
     var done = 0;
     for (final job in jobs) {
       final printUrl = job.printUrl;
-      if (printUrl == null || printUrl.isEmpty || await _artCache.hasArt(job.id)) {
+      if (printUrl == null ||
+          printUrl.isEmpty ||
+          await _artCache.hasArt(job.id)) {
         done++;
       } else {
         missing.add((id: job.id, url: printUrl, display: false));
@@ -399,10 +453,79 @@ class ScryfallSyncService extends ChangeNotifier {
       }
     }
 
-    await Future.wait(
-      List.generate(kArtConcurrency, (_) => worker()),
-    );
+    await Future.wait(List.generate(kArtConcurrency, (_) => worker()));
   }
+}
+
+final _jsonOptions = Options(
+  connectTimeout: const Duration(seconds: 60),
+  receiveTimeout: const Duration(seconds: 60),
+);
+
+Dio createScryfallDio() {
+  final dio = Dio(
+    BaseOptions(
+      headers: {
+        'User-Agent': kScryfallUserAgent,
+        'Accept': 'application/json, */*',
+      },
+      connectTimeout: const Duration(seconds: 60),
+      receiveTimeout: const Duration(minutes: 20),
+    ),
+  );
+  dio.httpClientAdapter = IOHttpClientAdapter(
+    createHttpClient: () {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 30);
+      client.connectionFactory = _connectPreferIpv4;
+      return client;
+    },
+  );
+  return dio;
+}
+
+/// Scryfall often stalls on IPv6 from mobile networks. Connect to IPv4 first.
+///
+/// A custom [HttpClient.connectionFactory] socket is not upgraded by Dart, so
+/// HTTPS has to be wrapped here. Otherwise Cloudflare answers 400:
+/// "The plain HTTP request was sent to HTTPS port".
+Future<ConnectionTask<Socket>> _connectPreferIpv4(
+  Uri uri,
+  String? proxyHost,
+  int? proxyPort,
+) {
+  final pending = _openSocket(uri, proxyHost, proxyPort);
+  return Future.value(
+    ConnectionTask.fromSocket(pending, () {
+      pending.then((socket) => socket.destroy()).ignore();
+    }),
+  );
+}
+
+Future<Socket> _openSocket(Uri uri, String? proxyHost, int? proxyPort) async {
+  const timeout = Duration(seconds: 8);
+  final host = proxyHost ?? uri.host;
+  final port = proxyPort ?? uri.port;
+  Socket? socket;
+  if (proxyHost == null) {
+    try {
+      final addresses = await InternetAddress.lookup(
+        host,
+        type: InternetAddressType.IPv4,
+      ).timeout(const Duration(seconds: 8));
+      for (final address in addresses) {
+        try {
+          socket = await Socket.connect(address, port, timeout: timeout);
+          break;
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+  socket ??= await Socket.connect(host, port, timeout: timeout);
+  if (proxyHost == null && uri.scheme == 'https') {
+    return SecureSocket.secure(socket, host: uri.host);
+  }
+  return socket;
 }
 
 Map<String, dynamic> _asJsonMap(dynamic payload) {

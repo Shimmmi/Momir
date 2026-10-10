@@ -1,4 +1,5 @@
 import '../../models/creature.dart';
+import '../game_mode.dart';
 import 'database.dart';
 
 class MatchPlayer {
@@ -30,15 +31,16 @@ class ActiveMatch {
     required this.turnIndex,
     required this.players,
     required this.summons,
+    this.mode = GameMode.creature,
   });
 
   final int id;
   final int turnIndex;
+  final GameMode mode;
   final List<MatchPlayer> players;
   final List<MatchSummon> summons;
 
-  MatchPlayer get currentPlayer =>
-      players[turnIndex % players.length];
+  MatchPlayer get currentPlayer => players[turnIndex % players.length];
 }
 
 class MatchRepository {
@@ -46,11 +48,15 @@ class MatchRepository {
 
   final AppDatabase _database;
 
-  Future<int> create(List<String> names) async {
+  Future<int> create(
+    List<String> names, {
+    GameMode mode = GameMode.creature,
+  }) async {
     final db = await _database.db;
     final id = await db.insert('matches', {
       'created_at': DateTime.now().toIso8601String(),
       'turn_index': 0,
+      'mode': mode.name,
     });
     for (var i = 0; i < names.length; i++) {
       await db.insert('match_players', {
@@ -62,10 +68,12 @@ class MatchRepository {
     return id;
   }
 
-  Future<ActiveMatch?> latest() async {
+  Future<ActiveMatch?> latest(GameMode mode) async {
     final db = await _database.db;
     final rows = await db.query(
       'matches',
+      where: 'mode = ?',
+      whereArgs: [mode.name],
       orderBy: 'id DESC',
       limit: 1,
     );
@@ -105,6 +113,9 @@ ORDER BY s.id DESC
     return ActiveMatch(
       id: id,
       turnIndex: (matchRows.first['turn_index'] as num).toInt(),
+      mode:
+          GameMode.parse(matchRows.first['mode'] as String?) ??
+          GameMode.creature,
       players: [
         for (final row in playerRows)
           MatchPlayer(

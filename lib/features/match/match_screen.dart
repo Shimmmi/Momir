@@ -9,13 +9,16 @@ import '../../core/ble/printer_connection_service.dart';
 import '../../core/constants.dart';
 import '../../core/db/creature_repository.dart';
 import '../../core/db/match_repository.dart';
+import '../../core/game_mode.dart';
 import '../../services/print_service.dart';
 import '../../widgets/card_renderer.dart';
 import '../../widgets/creature_image_dialog.dart';
 import '../printer_setup/printer_picker.dart';
 
 class MatchEntry extends StatefulWidget {
-  const MatchEntry({super.key});
+  const MatchEntry({super.key, this.mode = GameMode.creature});
+
+  final GameMode mode;
 
   @override
   State<MatchEntry> createState() => _MatchEntryState();
@@ -32,7 +35,7 @@ class _MatchEntryState extends State<MatchEntry> {
   }
 
   Future<void> _load() async {
-    final match = await context.read<MatchRepository>().latest();
+    final match = await context.read<MatchRepository>().latest(widget.mode);
     if (!mounted) return;
     setState(() {
       _match = match;
@@ -47,7 +50,10 @@ class _MatchEntryState extends State<MatchEntry> {
     }
     final match = _match;
     if (match == null) {
-      return MatchSetupScreen(onCreated: (created) => setState(() => _match = created));
+      return MatchSetupScreen(
+        mode: widget.mode,
+        onCreated: (created) => setState(() => _match = created),
+      );
     }
     return MatchPlayScreen(
       match: match,
@@ -58,9 +64,14 @@ class _MatchEntryState extends State<MatchEntry> {
 }
 
 class MatchSetupScreen extends StatefulWidget {
-  const MatchSetupScreen({super.key, required this.onCreated});
+  const MatchSetupScreen({
+    super.key,
+    required this.onCreated,
+    this.mode = GameMode.creature,
+  });
 
   final ValueChanged<ActiveMatch> onCreated;
+  final GameMode mode;
 
   @override
   State<MatchSetupScreen> createState() => _MatchSetupScreenState();
@@ -84,10 +95,10 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Новая партия'),
+        title: Text(widget.mode.label),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/menu'),
+          onPressed: () => context.go('/match'),
         ),
       ),
       body: ListView(
@@ -136,10 +147,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
             child: const Text('Добавить игрока'),
           ),
           const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _start,
-            child: const Text('Начать'),
-          ),
+          FilledButton(onPressed: _start, child: const Text('Начать')),
         ],
       ),
     );
@@ -157,7 +165,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
         .where((n) => n.isNotEmpty)
         .toList();
     if (names.length < 2) return;
-    final id = await repo.create(names);
+    final id = await repo.create(names, mode: widget.mode);
     final match = await repo.byId(id);
     if (match != null) widget.onCreated(match);
   }
@@ -189,13 +197,19 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
     final player = match.currentPlayer;
     return Scaffold(
       appBar: AppBar(
-        title: Text('Ход: ${player.name}'),
+        title: Text(
+          '${match.mode.label} · ${player.name}',
+          overflow: TextOverflow.ellipsis,
+        ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go('/menu'),
         ),
         actions: [
-          TextButton(onPressed: _busy ? null : widget.onNew, child: const Text('Новая')),
+          TextButton(
+            onPressed: _busy ? null : widget.onNew,
+            child: const Text('Новая'),
+          ),
         ],
       ),
       body: ListView(
@@ -204,7 +218,10 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
           if (_status != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: Text(_status!, style: Theme.of(context).textTheme.bodyMedium),
+              child: Text(
+                _status!,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
             ),
           GridView.count(
             crossAxisCount: 4,
@@ -231,7 +248,8 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
           if (match.summons.isEmpty)
             Text('Пока пусто', style: Theme.of(context).textTheme.bodyMedium)
           else
-            for (final summon in match.summons) _SummonTile(summon: summon, onReprint: () => _reprint(summon)),
+            for (final summon in match.summons)
+              _SummonTile(summon: summon, onReprint: () => _reprint(summon)),
         ],
       ),
     );
@@ -255,9 +273,9 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
     final match = widget.match;
     final player = match.currentPlayer;
     try {
-      final creature = await creatures.pickRandom(cmc);
+      final creature = await creatures.pickRandom(cmc, mode: match.mode);
       if (creature == null) {
-        if (mounted) setState(() => _status = 'Существ с такой стоимостью нет');
+        if (mounted) setState(() => _status = match.mode.emptyPool);
         return;
       }
       final summonId = await matches.addSummon(
@@ -374,11 +392,8 @@ class _SummonTile extends StatelessWidget {
       trailing: summon.printError == null
           ? null
           : TextButton(onPressed: onReprint, child: const Text('Ещё раз')),
-      onTap: () => showCreatureImage(
-        context,
-        creature: summon.creature,
-        art: art,
-      ),
+      onTap: () =>
+          showCreatureImage(context, creature: summon.creature, art: art),
     );
   }
 }

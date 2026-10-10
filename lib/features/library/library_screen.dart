@@ -8,6 +8,7 @@ import '../../app/theme.dart';
 import '../../core/art/art_cache_service.dart';
 import '../../core/constants.dart';
 import '../../core/db/creature_repository.dart';
+import '../../core/game_mode.dart';
 import '../../models/creature.dart';
 import '../../widgets/creature_image_dialog.dart';
 import '../../widgets/mana_symbol.dart';
@@ -24,6 +25,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   final _setQuery = TextEditingController();
   final _colors = <String>{};
   int? _cmc;
+  GameMode? _type;
   String? _setCode;
   var _sortByCmc = false;
   var _loading = false;
@@ -53,7 +55,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Удалить все изображения?'),
         content: const Text(
-          'Картинки на телефоне будут стёрты. База существ и партии останутся. Потом их можно скачать снова.',
+          'Картинки на телефоне будут стёрты. База карт и партии останутся. Потом их можно скачать снова.',
         ),
         actions: [
           TextButton(
@@ -70,9 +72,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (ok != true) return;
     await art.deleteAllImages();
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Изображения удалены')),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Изображения удалены')));
   }
 
   Future<void> _boot() async {
@@ -101,6 +102,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       cmc: _cmc,
       colors: _colors,
       setCode: _setCode,
+      mode: _type,
       sortByCmc: _sortByCmc,
       offset: _offset,
     );
@@ -188,7 +190,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: TextField(
               controller: _query,
               decoration: const InputDecoration(
-                hintText: 'Имя существа',
+                hintText: 'Имя карты',
                 isDense: true,
               ),
               onSubmitted: (_) => _reload(),
@@ -202,6 +204,32 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 setState(() => _cmc = value);
                 _reload();
               },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                FilterChip(
+                  label: const Text('Все'),
+                  selected: _type == null,
+                  onSelected: (_) {
+                    setState(() => _type = null);
+                    _reload();
+                  },
+                ),
+                for (final mode in GameMode.values)
+                  FilterChip(
+                    label: Text(mode.typeLabel),
+                    selected: _type == mode,
+                    onSelected: (_) {
+                      setState(() => _type = _type == mode ? null : mode);
+                      _reload();
+                    },
+                  ),
+              ],
             ),
           ),
           Padding(
@@ -290,11 +318,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     subtitle: Text(
                       '${card.cmc} · ${card.setName ?? card.setCode ?? ''}',
                     ),
-                    onTap: () => showCreatureImage(
-                      context,
-                      creature: card,
-                      art: art,
-                    ),
+                    onTap: () =>
+                        showCreatureImage(context, creature: card, art: art),
                   );
                 },
               ),

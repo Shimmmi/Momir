@@ -9,9 +9,11 @@ import 'package:momir/core/art/art_prep.dart';
 import 'package:momir/core/ble/escpos_encoder.dart';
 import 'package:momir/core/ble/tspl_encoder.dart';
 import 'package:momir/core/mana/mana_cost_parser.dart';
+import 'package:dio/dio.dart';
 import 'package:momir/core/scryfall/bulk_uri.dart';
 import 'package:momir/core/scryfall/card_extractor.dart';
 import 'package:momir/core/scryfall/json_array_reader.dart';
+import 'package:momir/core/scryfall/sync_error.dart';
 
 void main() {
   test('parseManaText splits symbols and text', () {
@@ -90,21 +92,18 @@ void main() {
 
   test('oraclePieces keeps spaces and paragraph breaks', () {
     final pieces = oraclePieces('{T}: Draw a card.\nFlying');
-    expect(
-      pieces.map((p) => p.kind).toList(),
-      [
-        OraclePieceKind.symbol,
-        OraclePieceKind.word,
-        OraclePieceKind.space,
-        OraclePieceKind.word,
-        OraclePieceKind.space,
-        OraclePieceKind.word,
-        OraclePieceKind.space,
-        OraclePieceKind.word,
-        OraclePieceKind.lineBreak,
-        OraclePieceKind.word,
-      ],
-    );
+    expect(pieces.map((p) => p.kind).toList(), [
+      OraclePieceKind.symbol,
+      OraclePieceKind.word,
+      OraclePieceKind.space,
+      OraclePieceKind.word,
+      OraclePieceKind.space,
+      OraclePieceKind.word,
+      OraclePieceKind.space,
+      OraclePieceKind.word,
+      OraclePieceKind.lineBreak,
+      OraclePieceKind.word,
+    ]);
     expect(
       pieces
           .where((p) => p.kind == OraclePieceKind.word)
@@ -224,6 +223,140 @@ void main() {
     });
     expect(c?.name, 'Delver of Secrets');
     expect(c?.manaCost, '{U}');
+    expect(c?.isCreature, isTrue);
+    expect(c?.isArtifact, isFalse);
+  });
+
+  test('extractCreature keeps artifacts, enchantments, and planeswalkers', () {
+    final golem = extractCreature({
+      'id': 'golem',
+      'name': 'Iron Golem',
+      'mana_cost': '{4}',
+      'cmc': 4,
+      'type_line': 'Artifact Creature — Golem',
+      'power': '4',
+      'toughness': '4',
+      'colors': <String>[],
+      'layout': 'normal',
+    });
+    expect(golem?.isCreature, isTrue);
+    expect(golem?.isArtifact, isTrue);
+    expect(golem?.isEnchantment, isFalse);
+
+    final sol = extractCreature({
+      'id': 'sol',
+      'name': 'Sol Ring',
+      'mana_cost': '{1}',
+      'cmc': 1,
+      'type_line': 'Artifact',
+      'oracle_text': '{T}: Add {C}{C}.',
+      'colors': <String>[],
+      'layout': 'normal',
+    });
+    expect(sol?.isArtifact, isTrue);
+    expect(sol?.isCreature, isFalse);
+    expect(sol?.power, isNull);
+
+    final saga = extractCreature({
+      'id': 'saga',
+      'name': 'The Antiquities War',
+      'cmc': 3,
+      'type_line': 'Enchantment — Saga',
+      'oracle_text': 'I — ...',
+      'colors': ['U'],
+      'layout': 'saga',
+    });
+    expect(saga?.isEnchantment, isTrue);
+    expect(saga?.isCreature, isFalse);
+
+    expect(
+      extractCreature({
+        'id': 'aura',
+        'name': 'Giant Growth',
+        'cmc': 1,
+        'type_line': 'Enchantment — Aura',
+        'oracle_text': 'Enchant creature\nEnchanted creature gets +3/+3.',
+        'colors': ['G'],
+        'layout': 'normal',
+      }),
+      isNull,
+    );
+    expect(
+      extractCreature({
+        'id': 'weird-aura',
+        'name': 'Nameless Aura',
+        'cmc': 1,
+        'type_line': 'Enchantment — Aura',
+        'oracle_text': 'Enchanted permanent is weird.',
+        'colors': <String>[],
+        'layout': 'normal',
+      }),
+      isNull,
+    );
+    expect(
+      extractCreature({
+        'id': 'or-vehicle',
+        'name': 'Or Vehicle',
+        'cmc': 2,
+        'type_line': 'Enchantment — Aura',
+        'oracle_text': 'Enchant creature or Vehicle\n...',
+        'colors': <String>[],
+        'layout': 'normal',
+      }),
+      isNull,
+    );
+
+    final landAura = extractCreature({
+      'id': 'land-aura',
+      'name': 'Fertile Ground',
+      'cmc': 2,
+      'type_line': 'Enchantment — Aura',
+      'oracle_text':
+          'Enchant land\nEnchanted land has "{T}: Add one mana of any color."',
+      'colors': ['G'],
+      'layout': 'normal',
+    });
+    expect(landAura?.name, 'Fertile Ground');
+    expect(landAura?.isEnchantment, isTrue);
+    expect(landAura?.isCreature, isFalse);
+
+    final walker = extractCreature({
+      'id': 'jace',
+      'name': 'Jace, the Mind Sculptor',
+      'cmc': 4,
+      'type_line': 'Legendary Planeswalker — Jace',
+      'oracle_text': '+2: ...',
+      'loyalty': '4',
+      'colors': ['U'],
+      'layout': 'normal',
+    });
+    expect(walker?.isPlaneswalker, isTrue);
+    expect(walker?.loyalty, '4');
+    expect(walker?.isCreature, isFalse);
+
+    final numeric = extractCreature({
+      'id': 'num',
+      'name': 'Walker',
+      'cmc': 3,
+      'type_line': 'Planeswalker — Test',
+      'loyalty': 3,
+      'colors': <String>[],
+      'layout': 'normal',
+    });
+    expect(numeric?.loyalty, '3');
+
+    expect(
+      extractCreature({
+        'id': 'bolt',
+        'name': 'Lightning Bolt',
+        'cmc': 1,
+        'type_line': 'Instant',
+        'oracle_text': 'Deal 3 damage.',
+        'colors': ['R'],
+        'layout': 'normal',
+      }),
+      isNull,
+    );
   });
 
   test('bulkDownloadUri prefers jsonl_download_uri', () {
@@ -271,6 +404,24 @@ void main() {
     expect(items.length, 2);
     expect(items.first['name'], 'A');
     await dir.delete(recursive: true);
+  });
+
+  test('syncErrorMessage hides the Dio timeout dump', () {
+    final timeout = DioException(
+      requestOptions: RequestOptions(path: 'https://api.scryfall.com'),
+      type: DioExceptionType.connectionTimeout,
+      message: 'The request connection took longer than 0:00:30.000000',
+    );
+    expect(
+      syncErrorMessage(timeout),
+      'Нет ответа от Scryfall. Проверьте интернет и повторите.',
+    );
+    expect(isRetryableSyncError(timeout), isTrue);
+    expect(
+      syncErrorMessage(StateError('Не найден пакет oracle_cards.')),
+      'Не найден пакет oracle_cards.',
+    );
+    expect(isRetryableSyncError(StateError('x')), isFalse);
   });
 }
 

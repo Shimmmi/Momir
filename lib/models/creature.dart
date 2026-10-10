@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../core/game_mode.dart';
+
 class Creature {
   const Creature({
     required this.id,
@@ -15,6 +17,11 @@ class Creature {
     this.imageUriNormal,
     this.setCode,
     this.setName,
+    this.loyalty,
+    this.isCreature = false,
+    this.isArtifact = false,
+    this.isEnchantment = false,
+    this.isPlaneswalker = false,
   });
 
   final String id;
@@ -30,11 +37,24 @@ class Creature {
   final String? imageUriNormal;
   final String? setCode;
   final String? setName;
+  final String? loyalty;
+  final bool isCreature;
+  final bool isArtifact;
+  final bool isEnchantment;
+  final bool isPlaneswalker;
 
   String get colorsKey => colors.join(',');
 
-  String? get artUrl =>
-      (imageUriArtCrop != null && imageUriArtCrop!.isNotEmpty)
+  bool matches(GameMode mode) => switch (mode) {
+    GameMode.creature => isCreature,
+    GameMode.artifact => isArtifact,
+    GameMode.enchantment => isEnchantment,
+    GameMode.planeswalker => isPlaneswalker,
+  };
+
+  bool matchesAny(Set<GameMode> modes) => modes.any(matches);
+
+  String? get artUrl => (imageUriArtCrop != null && imageUriArtCrop!.isNotEmpty)
       ? imageUriArtCrop
       : imageUriNormal;
 
@@ -52,6 +72,11 @@ class Creature {
     'image_uri_normal': imageUriNormal,
     'set_code': setCode,
     'set_name': setName,
+    'loyalty': loyalty,
+    'is_creature': isCreature ? 1 : 0,
+    'is_artifact': isArtifact ? 1 : 0,
+    'is_enchantment': isEnchantment ? 1 : 0,
+    'is_planeswalker': isPlaneswalker ? 1 : 0,
   };
 
   factory Creature.fromRow(Map<String, Object?> row) {
@@ -80,6 +105,11 @@ class Creature {
       imageUriNormal: row['image_uri_normal'] as String?,
       setCode: row['set_code'] as String?,
       setName: row['set_name'] as String?,
+      loyalty: row['loyalty'] as String?,
+      isCreature: _flag(row['is_creature'], ifNull: true),
+      isArtifact: _flag(row['is_artifact']),
+      isEnchantment: _flag(row['is_enchantment']),
+      isPlaneswalker: _flag(row['is_planeswalker']),
     );
   }
 
@@ -88,4 +118,11 @@ class Creature {
   factory Creature.fromIsolateMap(Map<dynamic, dynamic> map) {
     return Creature.fromRow(Map<String, Object?>.from(map));
   }
+}
+
+bool _flag(Object? value, {bool ifNull = false}) {
+  if (value == null) return ifNull;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  return ifNull;
 }

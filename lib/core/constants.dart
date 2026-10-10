@@ -11,6 +11,7 @@ const kPrefsColorFilter = 'color_filter';
 const kPrefsLastSyncIso = 'last_sync_iso';
 const kMetaLastSync = 'last_sync_iso';
 const kMetaCreatureCount = 'creature_count';
+const kMetaSyncModes = 'sync_modes';
 const kArtWidth = 384;
 
 /// Real Magic card is 63.5 × 88.9 mm. On a 57 mm roll the whole receipt

@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../models/creature.dart';
 import '../constants.dart';
+import '../game_mode.dart';
 import 'database.dart';
 
 class CreatureRepository {
@@ -13,6 +14,45 @@ class CreatureRepository {
     final db = await _database.db;
     final rows = await db.rawQuery('SELECT COUNT(*) AS c FROM creatures');
     return Sqflite.firstIntValue(rows) ?? 0;
+  }
+
+  Future<int> countFor(GameMode mode) async {
+    final db = await _database.db;
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM creatures WHERE ${mode.column} = 1',
+    );
+    return Sqflite.firstIntValue(rows) ?? 0;
+  }
+
+  Future<Map<GameMode, int>> countsByMode() async {
+    final db = await _database.db;
+    final rows = await db.rawQuery('''
+SELECT
+  COALESCE(SUM(is_creature), 0) AS creature,
+  COALESCE(SUM(is_artifact), 0) AS artifact,
+  COALESCE(SUM(is_enchantment), 0) AS enchantment,
+  COALESCE(SUM(is_planeswalker), 0) AS planeswalker
+FROM creatures
+''');
+    final row = rows.first;
+    int read(String key) => (row[key] as num?)?.toInt() ?? 0;
+    return {
+      GameMode.creature: read('creature'),
+      GameMode.artifact: read('artifact'),
+      GameMode.enchantment: read('enchantment'),
+      GameMode.planeswalker: read('planeswalker'),
+    };
+  }
+
+  Future<void> deleteByModes(Set<GameMode> modes) async {
+    if (modes.isEmpty) return;
+    if (modes.length >= GameMode.values.length) {
+      await clearCreatures();
+      return;
+    }
+    final db = await _database.db;
+    final clause = modes.map((mode) => '${mode.column} = 1').join(' OR ');
+    await db.rawDelete('DELETE FROM creatures WHERE $clause');
   }
 
   Future<void> replaceAll(List<Creature> batch) async {
@@ -33,12 +73,14 @@ class CreatureRepository {
     await db.delete('creatures');
   }
 
-  Future<List<({String id, String? printUrl, String? displayUrl})>>
-  imageJobs() async {
+  Future<List<({String id, String? printUrl, String? displayUrl})>> imageJobs({
+    Set<GameMode>? modes,
+  }) async {
     final db = await _database.db;
     final rows = await db.query(
       'creatures',
       columns: ['id', 'image_uri_art_crop', 'image_uri_normal'],
+      where: _modeClause(modes),
     );
     return rows
         .map(
@@ -74,15 +116,19 @@ class CreatureRepository {
   }
 
   /// [cmc] 0–[kMaxExactCmc] exact; [kMaxExactCmc]+1 means that value and above.
-  Future<Creature?> pickRandom(int cmc, {Set<String> colors = const {}}) async {
+  Future<Creature?> pickRandom(
+    int cmc, {
+    Set<String> colors = const {},
+    GameMode mode = GameMode.creature,
+  }) async {
     final db = await _database.db;
-    final where = StringBuffer();
+    final where = StringBuffer('${mode.column} = 1');
     final args = <Object>[];
     if (cmc > kMaxExactCmc) {
-      where.write('cmc >= ?');
+      where.write(' AND cmc >= ?');
       args.add(kMaxExactCmc + 1);
     } else {
-      where.write('cmc = ?');
+      where.write(' AND cmc = ?');
       args.add(cmc);
     }
     for (final color in const ['W', 'U', 'B', 'R', 'G']) {
@@ -135,6 +181,7 @@ ORDER BY set_name COLLATE NOCASE
     int? cmc,
     Set<String> colors = const {},
     String? setCode,
+    GameMode? mode,
     bool sortByCmc = false,
     int limit = 60,
     int offset = 0,
@@ -160,17 +207,31 @@ ORDER BY set_name COLLATE NOCASE
       where.write(' AND set_code = ?');
       args.add(setCode);
     }
+    if (mode != null) {
+      where.write(' AND ${mode.column} = 1');
+    }
     for (final color in const ['W', 'U', 'B', 'R', 'G']) {
       if (colors.isNotEmpty && !colors.contains(color)) {
         where.write(' AND colors NOT LIKE ?');
         args.add('%"$color"%');
       }
     }
-    final order = sortByCmc ? 'cmc, name COLLATE NOCASE' : 'name COLLATE NOCASE';
+    final order = sortByCmc
+        ? 'cmc, name COLLATE NOCASE'
+        : 'name COLLATE NOCASE';
     final rows = await db.rawQuery(
       'SELECT * FROM creatures WHERE $where ORDER BY $order LIMIT ? OFFSET ?',
       [...args, limit, offset],
     );
     return rows.map(Creature.fromRow).toList(growable: false);
   }
+}
+
+String? _modeClause(Set<GameMode>? modes) {
+  if (modes == null ||
+      modes.isEmpty ||
+      modes.length >= GameMode.values.length) {
+    return null;
+  }
+  return modes.map((mode) => '${mode.column} = 1').join(' OR ');
 }

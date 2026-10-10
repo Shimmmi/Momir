@@ -7,6 +7,7 @@ import '../../app/summon_controller.dart';
 import '../../app/theme.dart';
 import '../../core/ble/printer_connection_service.dart';
 import '../../core/constants.dart';
+import '../../core/game_mode.dart';
 import '../../core/scryfall/scryfall_sync_service.dart';
 import '../../widgets/mana_symbol.dart';
 import '../printer_setup/printer_picker.dart';
@@ -33,7 +34,10 @@ class HomeScreen extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Text('Симулятор', style: Theme.of(context).textTheme.headlineSmall),
+                  Text(
+                    'Симулятор',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
                   const Spacer(),
                   TextButton(
                     onPressed: () => context.go('/menu'),
@@ -47,8 +51,8 @@ class HomeScreen extends StatelessWidget {
                 printerLabel: printer.isConnected
                     ? (printer.savedName ?? 'принтер')
                     : 'Принтер не подключён',
-                libraryLabel: sync.progress.creatureCount > 0
-                    ? '${sync.progress.creatureCount} существ'
+                libraryLabel: sync.progress.countOf(GameMode.creature) > 0
+                    ? '${sync.progress.countOf(GameMode.creature)} существ'
                     : 'База карт',
                 artsLabel: sync.progress.isRunning && sync.progress.background
                     ? 'арты ${sync.progress.artsDone}/${sync.progress.artsTotal}'
@@ -71,12 +75,8 @@ class HomeScreen extends StatelessWidget {
                       ),
                     _CmcButton(
                       label: '${kMaxExactCmc + 1}+',
-                      onTap: () => _summon(
-                        context,
-                        summon,
-                        settings,
-                        kMaxExactCmc + 1,
-                      ),
+                      onTap: () =>
+                          _summon(context, summon, settings, kMaxExactCmc + 1),
                     ),
                   ],
                 ),

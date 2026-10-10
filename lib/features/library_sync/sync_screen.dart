@@ -4,25 +4,69 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/art/art_download_guard.dart';
-import '../../core/scryfall/scryfall_sync_service.dart';
+import '../../core/constants.dart';
 import '../../core/db/creature_repository.dart';
 import '../../core/db/database.dart';
+import '../../core/game_mode.dart';
+import '../../core/scryfall/scryfall_sync_service.dart';
 
-class SyncScreen extends StatelessWidget {
-  const SyncScreen({super.key, this.fromSettings = false});
+class SyncScreen extends StatefulWidget {
+  const SyncScreen({super.key, this.fromSettings = false, this.initialModes});
 
   final bool fromSettings;
+  final Set<GameMode>? initialModes;
+
+  @override
+  State<SyncScreen> createState() => _SyncScreenState();
+}
+
+class _SyncScreenState extends State<SyncScreen> {
+  var _modes = Set<GameMode>.of(GameMode.values);
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initialModes;
+    if (initial != null && initial.isNotEmpty) {
+      _modes = Set.of(initial);
+    }
+    _loadModes();
+  }
+
+  Future<void> _loadModes() async {
+    final db = context.read<AppDatabase>();
+    if (widget.initialModes != null && widget.initialModes!.isNotEmpty) {
+      await db.setMeta(kMetaSyncModes, GameMode.encode(_modes));
+      return;
+    }
+    final saved = GameMode.tryParseSet(await db.meta(kMetaSyncModes));
+    if (!mounted || saved == null) return;
+    setState(() => _modes = saved);
+  }
+
+  Future<void> _setModes(Set<GameMode> modes) async {
+    if (modes.isEmpty) return;
+    setState(() => _modes = modes);
+    await context.read<AppDatabase>().setMeta(
+      kMetaSyncModes,
+      GameMode.encode(modes),
+    );
+  }
+
+  bool get _allSelected => _modes.length == GameMode.values.length;
 
   @override
   Widget build(BuildContext context) {
     final sync = context.watch<ScryfallSyncService>();
     final p = sync.progress;
     final running = p.isRunning;
+    final hasCards =
+        p.creatureCount > 0 || p.typeCounts.values.any((n) => n > 0);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Обновление'),
-        leading: fromSettings || p.creatureCount > 0
+        leading: widget.fromSettings || hasCards
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),
                 onPressed: () => context.go('/menu'),
@@ -34,19 +78,47 @@ class SyncScreen extends StatelessWidget {
         child: ListView(
           children: [
             Text(
-              'Один раз по Wi‑Fi: существа Scryfall, затем иллюстрации '
-              '(150–400 МБ). Дальше игра идёт без сети.',
+              'Скачивается общий пакет Scryfall. В базу и в изображения '
+              'попадают только отмеченные типы. Дальше игра идёт без сети.',
               style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilterChip(
+                  label: const Text('Все'),
+                  selected: _allSelected,
+                  onSelected: running
+                      ? null
+                      : (_) => _setModes(Set.of(GameMode.values)),
+                ),
+                for (final mode in GameMode.values)
+                  FilterChip(
+                    label: Text('${mode.typeLabel} · ${p.countOf(mode)}'),
+                    selected: _modes.contains(mode),
+                    onSelected: running
+                        ? null
+                        : (on) {
+                            final next = Set<GameMode>.of(_modes);
+                            if (on) {
+                              next.add(mode);
+                            } else if (next.length > 1) {
+                              next.remove(mode);
+                            }
+                            _setModes(next);
+                          },
+                  ),
+              ],
             ),
             const SizedBox(height: 20),
             _PhaseTile(
               title: 'Карты',
-              subtitle: p.creatureCount > 0
-                  ? '${p.creatureCount} существ'
-                  : 'ещё не загружены',
+              subtitle: _libraryLine(p),
               value: p.phase == SyncPhase.downloadingBulk
                   ? (p.bulkFraction ?? 0)
-                  : (p.creatureCount > 0 ? 1 : 0),
+                  : (hasCards ? 1 : 0),
             ),
             const SizedBox(height: 12),
             _PhaseTile(
@@ -69,24 +141,21 @@ class SyncScreen extends StatelessWidget {
             ],
             const SizedBox(height: 24),
             if (!running) ...[
-              if (p.creatureCount > 0)
+              if (hasCards)
                 FilledButton(
                   onPressed: () => context.go('/menu'),
                   child: const Text('В меню'),
                 ),
-              if (p.creatureCount > 0) const SizedBox(height: 8),
+              if (hasCards) const SizedBox(height: 8),
               OutlinedButton(
-                onPressed: () => sync.sync(replaceCards: true),
-                child: Text(
-                  p.creatureCount == 0
-                      ? 'Скачать базу карт'
-                      : 'Обновить карты',
-                ),
+                onPressed: () => sync.sync(replaceCards: true, modes: _modes),
+                child: Text(hasCards ? 'Обновить карты' : 'Скачать базу карт'),
               ),
-              if (p.creatureCount > 0) ...[
+              if (hasCards) ...[
                 const SizedBox(height: 8),
                 OutlinedButton(
-                  onPressed: sync.retryFailedArts,
+                  onPressed: () =>
+                      sync.sync(replaceCards: false, modes: _modes),
                   child: const Text('Докачать изображения'),
                 ),
               ],
@@ -99,7 +168,7 @@ class SyncScreen extends StatelessWidget {
                 child: Text(sync.isPaused ? 'Продолжить' : 'Пауза'),
               ),
               const SizedBox(height: 8),
-              if (p.creatureCount > 0)
+              if (hasCards)
                 OutlinedButton(
                   onPressed: () {
                     sync.playInBackground();
@@ -116,10 +185,7 @@ class SyncScreen extends StatelessWidget {
               builder: (context, snap) {
                 final text = snap.data;
                 if (text == null) return const SizedBox.shrink();
-                return Text(
-                  text,
-                  style: Theme.of(context).textTheme.bodySmall,
-                );
+                return Text(text, style: Theme.of(context).textTheme.bodySmall);
               },
             ),
           ],
@@ -132,10 +198,26 @@ class SyncScreen extends StatelessWidget {
     final db = context.read<AppDatabase>();
     final repo = context.read<CreatureRepository>();
     final last = await db.meta('last_sync_iso');
-    final count = await repo.count();
-    final when = last == null ? 'никогда' : last.replaceFirst('T', ' ').split('.').first;
-    return 'Последняя синхронизация: $when\nСуществ в базе: $count';
+    final counts = await repo.countsByMode();
+    final when = last == null
+        ? 'никогда'
+        : last.replaceFirst('T', ' ').split('.').first;
+    final lines = [
+      'Последняя синхронизация: $when',
+      for (final mode in GameMode.values)
+        '${mode.typeLabel}: ${counts[mode] ?? 0}',
+    ];
+    return lines.join('\n');
   }
+}
+
+String _libraryLine(SyncProgress p) {
+  final parts = [
+    for (final mode in GameMode.values)
+      if (p.countOf(mode) > 0) '${mode.typeLabel}: ${p.countOf(mode)}',
+  ];
+  if (parts.isEmpty) return 'ещё не загружены';
+  return parts.join(' · ');
 }
 
 class _BatteryHint extends StatefulWidget {
@@ -145,7 +227,8 @@ class _BatteryHint extends StatefulWidget {
   State<_BatteryHint> createState() => _BatteryHintState();
 }
 
-class _BatteryHintState extends State<_BatteryHint> with WidgetsBindingObserver {
+class _BatteryHintState extends State<_BatteryHint>
+    with WidgetsBindingObserver {
   var _show = false;
 
   @override

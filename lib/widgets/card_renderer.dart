@@ -164,10 +164,13 @@ class CardRenderService {
       ellipsis: '…',
     )..layout(maxWidth: contentW);
 
-    final pt = [
-      creature.power,
-      creature.toughness,
-    ].whereType<String>().join('/');
+    final loyalty = creature.loyalty;
+    final pt = creature.isPlaneswalker && loyalty != null && loyalty.isNotEmpty
+        ? loyalty
+        : [
+            creature.power,
+            creature.toughness,
+          ].whereType<String>().where((part) => part.isNotEmpty).join('/');
     final ptPainter = TextPainter(
       text: TextSpan(
         text: pt.isEmpty ? '' : pt,
@@ -199,7 +202,10 @@ class CardRenderService {
     var oracleBudget = kPrintCardHeight - chrome(artH);
     if (oracleBudget < 48) {
       artH = (artH + oracleBudget - 48).clamp(96.0, kArtHeight.toDouble());
-      oracleBudget = (kPrintCardHeight - chrome(artH)).clamp(24.0, kMaxOracleHeight);
+      oracleBudget = (kPrintCardHeight - chrome(artH)).clamp(
+        24.0,
+        kMaxOracleHeight,
+      );
     }
     final oracleHeight = _measureOracle(
       creature.oracleText,
@@ -308,11 +314,7 @@ class CardRenderService {
       final radius = size / 2;
       final ring = (size * 0.1).clamp(1.0, 2.5);
       canvas.drawCircle(center, radius, Paint()..color = Colors.black);
-      canvas.drawCircle(
-        center,
-        radius - ring,
-        Paint()..color = Colors.white,
-      );
+      canvas.drawCircle(center, radius - ring, Paint()..color = Colors.white);
       canvas.save();
       canvas.clipPath(Path()..addOval(rect.deflate(ring)));
       paintImage(
@@ -321,10 +323,26 @@ class CardRenderService {
         image: icon,
         filterQuality: FilterQuality.none,
         colorFilter: const ColorFilter.matrix(<double>[
-          -1, 0, 0, 0, 255,
-          0, -1, 0, 0, 255,
-          0, 0, -1, 0, 255,
-          0, 0, 0, 1, 0,
+          -1,
+          0,
+          0,
+          0,
+          255,
+          0,
+          -1,
+          0,
+          0,
+          255,
+          0,
+          0,
+          -1,
+          0,
+          255,
+          0,
+          0,
+          0,
+          1,
+          0,
         ]),
       );
       canvas.restore();
@@ -413,10 +431,10 @@ class CardRenderService {
           if (x + tp.width > maxWidth && !atLineStart) newline();
           if (y + lineH > maxHeight) {
             if (canvas != null) {
-              _word('…', fontSize).paint(
-                canvas,
-                Offset(origin.dx + x, origin.dy + y),
-              );
+              _word(
+                '…',
+                fontSize,
+              ).paint(canvas, Offset(origin.dx + x, origin.dy + y));
             }
             return maxHeight;
           }

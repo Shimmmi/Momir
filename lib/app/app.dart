@@ -3,10 +3,12 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../core/db/creature_repository.dart';
+import '../core/game_mode.dart';
 import '../features/card_preview/card_preview_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/library_screen.dart';
 import '../features/library_sync/sync_screen.dart';
+import '../features/match/match_mode_screen.dart';
 import '../features/match/match_screen.dart';
 import '../features/menu/menu_screen.dart';
 import '../features/printer_setup/printer_scan_screen.dart';
@@ -22,7 +24,14 @@ class MomirApp extends StatelessWidget {
       initialLocation: '/',
       routes: [
         GoRoute(path: '/', builder: (_, _) => const _GateScreen()),
-        GoRoute(path: '/sync', builder: (_, _) => const SyncScreen()),
+        GoRoute(
+          path: '/sync',
+          builder: (_, state) => SyncScreen(
+            initialModes: GameMode.tryParseSet(
+              state.uri.queryParameters['modes'],
+            ),
+          ),
+        ),
         GoRoute(
           path: '/sync/settings',
           builder: (_, _) => const SyncScreen(fromSettings: true),
@@ -30,11 +39,16 @@ class MomirApp extends StatelessWidget {
         GoRoute(path: '/menu', builder: (_, _) => const MenuScreen()),
         GoRoute(path: '/home', builder: (_, _) => const HomeScreen()),
         GoRoute(path: '/library', builder: (_, _) => const LibraryScreen()),
-        GoRoute(path: '/match', builder: (_, _) => const MatchEntry()),
+        GoRoute(path: '/match', builder: (_, _) => const MatchModeScreen()),
         GoRoute(
-          path: '/preview',
-          builder: (_, _) => const CardPreviewScreen(),
+          path: '/match/play',
+          builder: (_, state) => MatchEntry(
+            mode:
+                GameMode.parse(state.uri.queryParameters['mode']) ??
+                GameMode.creature,
+          ),
         ),
+        GoRoute(path: '/preview', builder: (_, _) => const CardPreviewScreen()),
         GoRoute(
           path: '/printer',
           builder: (_, _) => const PrinterSettingsScreen(),
