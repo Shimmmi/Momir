@@ -107,7 +107,11 @@ class HomeScreen extends StatelessWidget {
     SettingsController settings,
     int cmc,
   ) async {
-    await summon.summon(cmc, colors: settings.colorFilter);
+    await summon.summon(
+      cmc,
+      colors: settings.colorFilter,
+      media: settings.printMedia,
+    );
     if (context.mounted) context.push('/preview');
   }
 

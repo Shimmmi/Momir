@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/art/art_cache_service.dart';
 import '../core/db/creature_repository.dart';
+import '../core/print_media.dart';
 import '../models/creature.dart';
 import '../widgets/card_renderer.dart';
 
@@ -21,14 +22,24 @@ class SummonController extends ChangeNotifier {
   int? cmc;
   var loading = false;
   String? error;
+  PrintMedia media = PrintMedia.roll57;
 
-  Future<void> summon(int selectedCmc, {Set<String> colors = const {}}) async {
+  Future<void> summon(
+    int selectedCmc, {
+    Set<String> colors = const {},
+    PrintMedia media = PrintMedia.roll57,
+  }) async {
     cmc = selectedCmc;
+    this.media = media;
     await _pick(colors: colors);
   }
 
-  Future<void> reroll({Set<String> colors = const {}}) async {
+  Future<void> reroll({
+    Set<String> colors = const {},
+    PrintMedia? media,
+  }) async {
     if (cmc == null) return;
+    if (media != null) this.media = media;
     await _pick(colors: colors);
   }
 
@@ -55,7 +66,8 @@ class SummonController extends ChangeNotifier {
     }
   }
 
-  Future<void> renderCurrent() async {
+  Future<void> renderCurrent({PrintMedia? media}) async {
+    if (media != null) this.media = media;
     final picked = creature;
     if (picked == null) return;
     loading = true;
@@ -70,7 +82,11 @@ class SummonController extends ChangeNotifier {
           artBytes = await (await _artCache.fileFor(picked.id)).readAsBytes();
         }
       }
-      card = await _renderer.renderCreature(picked, artJpeg: artBytes);
+      card = await _renderer.renderCreature(
+        picked,
+        artJpeg: this.media.showsArt ? artBytes : null,
+        media: this.media,
+      );
       error = null;
     } catch (e) {
       error = 'Не удалось собрать карточку: $e';

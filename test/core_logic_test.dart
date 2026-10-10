@@ -8,6 +8,7 @@ import 'package:image/image.dart' as img;
 import 'package:momir/core/art/art_prep.dart';
 import 'package:momir/core/ble/escpos_encoder.dart';
 import 'package:momir/core/ble/tspl_encoder.dart';
+import 'package:momir/core/print_media.dart';
 import 'package:momir/core/mana/mana_cost_parser.dart';
 import 'package:dio/dio.dart';
 import 'package:momir/core/scryfall/bulk_uri.dart';
@@ -151,10 +152,31 @@ void main() {
     );
     final text = String.fromCharCodes(bytes.take(80));
     expect(text, contains('SIZE 48 mm'));
+    expect(text, contains('GAP 0 mm, 0 mm'));
     expect(text, contains('BITMAP 0,0,48,8,0,'));
     final marker = ascii.encode('BITMAP 0,0,48,8,0,');
     final start = _indexOf(bytes, marker) + marker.length;
     expect(bytes[start], 0xff);
+  });
+
+  test('encodeTsplBitmap sizes a 40x58 label', () {
+    const media = PrintMedia.label40x58;
+    final width = media.widthDots;
+    const height = 464;
+    final bytes = encodeTsplBitmap(
+      raster: Uint8List(width ~/ 8 * height),
+      width: width,
+      height: height,
+      paperWidthMm: media.paperWidthMm,
+      paperHeightMm: media.paperHeightMm,
+      gapMm: media.gapMm,
+    );
+    final text = String.fromCharCodes(bytes.take(80));
+    expect(media.widthDots, 320);
+    expect(media.paperHeightMm, 58);
+    expect(text, contains('SIZE 40 mm, 58 mm'));
+    expect(text, contains('GAP 2 mm, 0 mm'));
+    expect(text, contains('BITMAP 0,0,40,464,0,'));
   });
 
   test('extractCreature keeps creatures and skips tokens', () {

@@ -10,6 +10,7 @@ import '../core/ble/escpos_encoder.dart';
 import '../core/ble/printer_profile.dart';
 import '../core/constants.dart';
 import '../core/mana/mana_cost_parser.dart';
+import '../core/print_media.dart';
 import '../models/creature.dart';
 
 class PrintableCard {
@@ -18,12 +19,14 @@ class PrintableCard {
     required this.height,
     required this.raster,
     required this.pngBytes,
+    this.media = PrintMedia.roll57,
   });
 
   final int width;
   final int height;
   final Uint8List raster;
   final Uint8List pngBytes;
+  final PrintMedia media;
 }
 
 class CardRenderService {
@@ -56,8 +59,12 @@ class CardRenderService {
   Future<PrintableCard> renderCreature(
     Creature creature, {
     Uint8List? artJpeg,
+    PrintMedia media = PrintMedia.roll57,
   }) async {
     await ensureLoaded();
+    if (!media.showsArt) {
+      return _paintLabel(creature);
+    }
     ui.Image? art;
     if (artJpeg != null && artJpeg.isNotEmpty) {
       art = await _ditherToUiImage(artJpeg);
@@ -69,9 +76,13 @@ class CardRenderService {
     }
   }
 
-  Future<PrintableCard> renderPlainText(String text) async {
+  Future<PrintableCard> renderPlainText(
+    String text, {
+    PrintMedia media = PrintMedia.roll57,
+  }) async {
     await ensureLoaded();
     const pad = 12.0;
+    final width = media.widthDots;
     final tp = TextPainter(
       text: TextSpan(
         text: text,
@@ -82,15 +93,15 @@ class CardRenderService {
         ),
       ),
       textDirection: TextDirection.ltr,
-    )..layout(maxWidth: _paintWidth - pad * 2);
+    )..layout(maxWidth: width - pad * 2);
     final height = (pad * 2 + tp.height + 24).ceil().clamp(48, 2000);
-    return _rasterize(_paintWidth, height, (canvas) {
+    return _rasterize(width, height, (canvas) {
       canvas.drawRect(
-        Rect.fromLTWH(0, 0, _paintWidth.toDouble(), height.toDouble()),
+        Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
         Paint()..color = Colors.white,
       );
       tp.paint(canvas, const Offset(pad, pad));
-    });
+    }, media: media);
   }
 
   Future<ui.Image> _ditherToUiImage(Uint8List jpeg) async {
@@ -164,13 +175,7 @@ class CardRenderService {
       ellipsis: '…',
     )..layout(maxWidth: contentW);
 
-    final loyalty = creature.loyalty;
-    final pt = creature.isPlaneswalker && loyalty != null && loyalty.isNotEmpty
-        ? loyalty
-        : [
-            creature.power,
-            creature.toughness,
-          ].whereType<String>().where((part) => part.isNotEmpty).join('/');
+    final pt = _cornerStat(creature);
     final ptPainter = TextPainter(
       text: TextSpan(
         text: pt.isEmpty ? '' : pt,
@@ -282,6 +287,169 @@ class CardRenderService {
     });
   }
 
+  /// Text card for a 40×58 mm label. No illustration: the sticker is too
+  /// small to keep both art and rules.
+  Future<PrintableCard> _paintLabel(Creature creature) async {
+    const width = kLabelWidthDots;
+    const height = kLabelHeightDots;
+    const inset = 4.0;
+    const pad = 8.0;
+    const manaSize = 16.0;
+    final contentLeft = inset + pad;
+    final contentRight = width - inset - pad;
+    final contentTop = inset + pad;
+    final contentBottom = height - inset - pad;
+    final contentW = contentRight - contentLeft;
+
+    final manaSpans = parseManaText(creature.manaCost);
+    final manaWidth = _manaRowWidth(manaSpans, manaSize);
+    final nameMax = (contentW - (manaWidth > 0 ? manaWidth + 6 : 0)).clamp(
+      72.0,
+      contentW,
+    );
+    var nameSize = 20.0;
+    late TextPainter namePainter;
+    while (true) {
+      namePainter = TextPainter(
+        text: TextSpan(
+          text: creature.name,
+          style: TextStyle(
+            color: Colors.black,
+            fontSize: nameSize,
+            fontWeight: FontWeight.w800,
+            height: 1.05,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+        maxLines: 3,
+        ellipsis: '…',
+      )..layout(maxWidth: nameMax);
+      if (namePainter.height <= 68 || nameSize <= 11) break;
+      nameSize -= 1;
+    }
+    final headerH = [
+      namePainter.height,
+      manaWidth > 0 ? manaSize : 0.0,
+    ].reduce((a, b) => a > b ? a : b);
+
+    final typePainter = TextPainter(
+      text: TextSpan(
+        text: creature.typeLine ?? '',
+        style: const TextStyle(
+          color: Colors.black,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          height: 1.15,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 2,
+      ellipsis: '…',
+    )..layout(maxWidth: contentW);
+
+    final stat = _cornerStat(creature);
+    final statPainter = TextPainter(
+      text: TextSpan(
+        text: stat,
+        style: const TextStyle(
+          color: Colors.black,
+          fontSize: 20,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      textAlign: TextAlign.right,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: contentW);
+
+    final statBlock = stat.isEmpty ? 0.0 : statPainter.height + 6;
+    var cursor = contentTop + headerH + 8 + typePainter.height + 8;
+    final oracleBudget = (contentBottom - cursor - statBlock).clamp(
+      0.0,
+      height.toDouble(),
+    );
+    final style = _oracleStyleThatFits(
+      creature.oracleText,
+      contentW,
+      oracleBudget,
+    );
+
+    return _rasterize(width, height, (canvas) {
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+        Paint()..color = Colors.white,
+      );
+      canvas.drawRect(
+        Rect.fromLTWH(inset, inset, width - inset * 2, height - inset * 2),
+        Paint()
+          ..color = Colors.black
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2,
+      );
+      namePainter.paint(canvas, Offset(contentLeft, contentTop));
+      if (manaWidth > 0) {
+        _paintManaRow(
+          canvas,
+          manaSpans,
+          Offset(
+            contentRight - manaWidth,
+            contentTop + (headerH - manaSize) / 2,
+          ),
+          manaSize,
+        );
+      }
+      var cy = contentTop + headerH + 8;
+      typePainter.paint(canvas, Offset(contentLeft, cy));
+      cy += typePainter.height + 8;
+      if (oracleBudget > 0) {
+        _paintOracle(
+          canvas,
+          creature.oracleText,
+          Rect.fromLTWH(contentLeft, cy, contentW, oracleBudget),
+          style: style,
+        );
+      }
+      if (stat.isNotEmpty) {
+        statPainter.paint(
+          canvas,
+          Offset(
+            contentRight - statPainter.width,
+            contentBottom - statPainter.height,
+          ),
+        );
+      }
+    }, media: PrintMedia.label40x58);
+  }
+
+  _OracleStyle _oracleStyleThatFits(
+    String? text,
+    double maxWidth,
+    double maxHeight,
+  ) {
+    const sizes = [12.0, 11.0, 10.0, 9.0];
+    var chosen = _OracleStyle.forSize(sizes.last);
+    if (text == null || text.trim().isEmpty || maxHeight <= 0) return chosen;
+    for (final size in sizes) {
+      final style = _OracleStyle.forSize(size);
+      final used = _measureOracle(text, maxWidth, maxHeight + 1, style: style);
+      chosen = style;
+      if (used <= maxHeight) break;
+    }
+    return chosen;
+  }
+
+  String _cornerStat(Creature creature) {
+    final loyalty = creature.loyalty;
+    if (creature.isPlaneswalker && loyalty != null && loyalty.isNotEmpty) {
+      return loyalty;
+    }
+    final power = creature.power;
+    final toughness = creature.toughness;
+    final hasPower = power != null && power.isNotEmpty;
+    final hasToughness = toughness != null && toughness.isNotEmpty;
+    if (hasPower && hasToughness) return '$power/$toughness';
+    return '';
+  }
+
   double _manaRowWidth(List<ManaSpan> spans, double size) {
     var w = 0.0;
     for (final s in spans) {
@@ -367,14 +535,31 @@ class CardRenderService {
     tp.paint(canvas, origin);
   }
 
-  double _measureOracle(String? text, double maxWidth, double maxHeight) {
+  double _measureOracle(
+    String? text,
+    double maxWidth,
+    double maxHeight, {
+    _OracleStyle style = const _OracleStyle(),
+  }) {
     if (text == null || text.trim().isEmpty) return 0;
-    return _layoutOracle(text, maxWidth, maxHeight, null, Offset.zero);
+    return _layoutOracle(text, maxWidth, maxHeight, null, Offset.zero, style);
   }
 
-  void _paintOracle(Canvas canvas, String? text, Rect bounds) {
+  void _paintOracle(
+    Canvas canvas,
+    String? text,
+    Rect bounds, {
+    _OracleStyle style = const _OracleStyle(),
+  }) {
     if (text == null || text.trim().isEmpty) return;
-    _layoutOracle(text, bounds.width, bounds.height, canvas, bounds.topLeft);
+    _layoutOracle(
+      text,
+      bounds.width,
+      bounds.height,
+      canvas,
+      bounds.topLeft,
+      style,
+    );
   }
 
   double _layoutOracle(
@@ -383,10 +568,11 @@ class CardRenderService {
     double maxHeight,
     Canvas? canvas,
     Offset origin,
+    _OracleStyle style,
   ) {
-    const fontSize = 13.0;
-    const lineH = 18.0;
-    const icon = 14.0;
+    final fontSize = style.fontSize;
+    final lineH = style.lineH;
+    final icon = style.icon;
     const paragraphGap = 6.0;
     var x = 0.0;
     var y = 0.0;
@@ -466,8 +652,9 @@ class CardRenderService {
   Future<PrintableCard> _rasterize(
     int width,
     int height,
-    void Function(Canvas canvas) paint,
-  ) async {
+    void Function(Canvas canvas) paint, {
+    PrintMedia media = PrintMedia.roll57,
+  }) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     paint(canvas);
@@ -486,6 +673,23 @@ class CardRenderService {
       height: height,
       raster: raster,
       pngBytes: png.buffer.asUint8List(),
+      media: media,
     );
   }
+}
+
+class _OracleStyle {
+  const _OracleStyle({this.fontSize = 13, this.lineH = 18, this.icon = 14});
+
+  factory _OracleStyle.forSize(double fontSize) {
+    return _OracleStyle(
+      fontSize: fontSize,
+      lineH: fontSize + 5,
+      icon: fontSize + 1,
+    );
+  }
+
+  final double fontSize;
+  final double lineH;
+  final double icon;
 }
