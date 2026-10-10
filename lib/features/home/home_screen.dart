@@ -33,7 +33,10 @@ class HomeScreen extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Text('Симулятор', style: Theme.of(context).textTheme.headlineSmall),
+                  Text(
+                    'Симулятор',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
                   const Spacer(),
                   TextButton(
                     onPressed: () => context.go('/menu'),
@@ -71,12 +74,8 @@ class HomeScreen extends StatelessWidget {
                       ),
                     _CmcButton(
                       label: '${kMaxExactCmc + 1}+',
-                      onTap: () => _summon(
-                        context,
-                        summon,
-                        settings,
-                        kMaxExactCmc + 1,
-                      ),
+                      onTap: () =>
+                          _summon(context, summon, settings, kMaxExactCmc + 1),
                     ),
                   ],
                 ),
@@ -107,7 +106,11 @@ class HomeScreen extends StatelessWidget {
     SettingsController settings,
     int cmc,
   ) async {
-    await summon.summon(cmc, colors: settings.colorFilter);
+    await summon.summon(
+      cmc,
+      colors: settings.colorFilter,
+      media: settings.printMedia,
+    );
     if (context.mounted) context.push('/preview');
   }
 

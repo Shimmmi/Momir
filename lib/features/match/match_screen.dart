@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/settings_controller.dart';
 import '../../core/art/art_cache_service.dart';
 import '../../core/ble/printer_connection_service.dart';
 import '../../core/constants.dart';
 import '../../core/db/creature_repository.dart';
 import '../../core/db/match_repository.dart';
+import '../../core/print_media.dart';
 import '../../services/print_service.dart';
 import '../../widgets/card_renderer.dart';
 import '../../widgets/creature_image_dialog.dart';
@@ -47,7 +49,9 @@ class _MatchEntryState extends State<MatchEntry> {
     }
     final match = _match;
     if (match == null) {
-      return MatchSetupScreen(onCreated: (created) => setState(() => _match = created));
+      return MatchSetupScreen(
+        onCreated: (created) => setState(() => _match = created),
+      );
     }
     return MatchPlayScreen(
       match: match,
@@ -136,10 +140,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
             child: const Text('Добавить игрока'),
           ),
           const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _start,
-            child: const Text('Начать'),
-          ),
+          FilledButton(onPressed: _start, child: const Text('Начать')),
         ],
       ),
     );
@@ -195,7 +196,10 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
           onPressed: () => context.go('/menu'),
         ),
         actions: [
-          TextButton(onPressed: _busy ? null : widget.onNew, child: const Text('Новая')),
+          TextButton(
+            onPressed: _busy ? null : widget.onNew,
+            child: const Text('Новая'),
+          ),
         ],
       ),
       body: ListView(
@@ -204,7 +208,10 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
           if (_status != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: Text(_status!, style: Theme.of(context).textTheme.bodyMedium),
+              child: Text(
+                _status!,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
             ),
           GridView.count(
             crossAxisCount: 4,
@@ -231,7 +238,8 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
           if (match.summons.isEmpty)
             Text('Пока пусто', style: Theme.of(context).textTheme.bodyMedium)
           else
-            for (final summon in match.summons) _SummonTile(summon: summon, onReprint: () => _reprint(summon)),
+            for (final summon in match.summons)
+              _SummonTile(summon: summon, onReprint: () => _reprint(summon)),
         ],
       ),
     );
@@ -244,6 +252,7 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
     final prints = context.read<PrintService>();
     final renderer = context.read<CardRenderService>();
     final art = context.read<ArtCacheService>();
+    final media = context.read<SettingsController>().printMedia;
     if (!printer.isConnected) {
       await showPrinterPicker(context);
       if (!mounted || !printer.isConnected) return;
@@ -272,6 +281,7 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
         renderer: renderer,
         prints: prints,
         creatures: creatures,
+        media: media,
       );
       await matches.setPrintError(summonId, error);
       await matches.advanceTurn(match.id, match.players.length);
@@ -295,6 +305,7 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
     final prints = context.read<PrintService>();
     final renderer = context.read<CardRenderService>();
     final art = context.read<ArtCacheService>();
+    final media = context.read<SettingsController>().printMedia;
     setState(() => _busy = true);
     final error = await _printCreature(
       summon.creature.id,
@@ -302,6 +313,7 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
       renderer: renderer,
       prints: prints,
       creatures: creatures,
+      media: media,
     );
     await matches.setPrintError(summon.id, error);
     final next = await matches.byId(widget.match.id);
@@ -320,13 +332,20 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
     required CardRenderService renderer,
     required PrintService prints,
     required CreatureRepository creatures,
+    required PrintMedia media,
   }) async {
     try {
       final creature = await creatures.byId(id);
       if (creature == null) return 'Карта не найдена';
       final file = await art.fileFor(id);
-      final bytes = await file.exists() ? await file.readAsBytes() : null;
-      final card = await renderer.renderCreature(creature, artJpeg: bytes);
+      final bytes = media.showsArt && await file.exists()
+          ? await file.readAsBytes()
+          : null;
+      final card = await renderer.renderCreature(
+        creature,
+        artJpeg: bytes,
+        media: media,
+      );
       await prints.printCard(card);
       return null;
     } catch (_) {
@@ -374,11 +393,8 @@ class _SummonTile extends StatelessWidget {
       trailing: summon.printError == null
           ? null
           : TextButton(onPressed: onReprint, child: const Text('Ещё раз')),
-      onTap: () => showCreatureImage(
-        context,
-        creature: summon.creature,
-        art: art,
-      ),
+      onTap: () =>
+          showCreatureImage(context, creature: summon.creature, art: art),
     );
   }
 }

@@ -6,6 +6,7 @@ import '../../app/settings_controller.dart';
 import '../../app/summon_controller.dart';
 import '../../app/theme.dart';
 import '../../core/ble/printer_connection_service.dart';
+import '../../core/print_media.dart';
 import '../../services/print_service.dart';
 
 class CardPreviewScreen extends StatefulWidget {
@@ -42,7 +43,10 @@ class _CardPreviewScreenState extends State<CardPreviewScreen> {
                       primary: summon.cmc == null ? 'На главную' : 'Ещё раз',
                       onPrimary: summon.cmc == null
                           ? () => context.go('/home')
-                          : () => summon.reroll(colors: settings.colorFilter),
+                          : () => summon.reroll(
+                              colors: settings.colorFilter,
+                              media: settings.printMedia,
+                            ),
                       secondary: summon.cmc == null ? null : 'На главную',
                       onSecondary: summon.cmc == null
                           ? null
@@ -73,57 +77,74 @@ class _CardPreviewScreenState extends State<CardPreviewScreen> {
             ),
           ),
           if (!blocked)
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (_printStatus != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        _printStatus!,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyMedium,
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (_printStatus != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          _printStatus!,
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
                       ),
-                    ),
-                  if (!printer.isConnected)
-                    FilledButton(
-                      onPressed: () => context.push('/printer'),
-                      child: const Text('Подключить принтер'),
-                    )
-                  else
-                    FilledButton(
-                      onPressed: card == null || summon.loading
-                          ? null
-                          : () => _print(printService, summon),
-                      child: const Text('Напечатать'),
-                    ),
-                  if (settings.rerollEnabled)
-                    TextButton(
-                      onPressed: summon.loading
-                          ? null
-                          : () => summon.reroll(colors: settings.colorFilter),
-                      child: const Text('Ещё раз'),
-                    ),
-                ],
+                    if (!printer.isConnected)
+                      FilledButton(
+                        onPressed: () => context.push('/printer'),
+                        child: const Text('Подключить принтер'),
+                      )
+                    else
+                      FilledButton(
+                        onPressed: card == null || summon.loading
+                            ? null
+                            : () => _print(printService, summon, settings),
+                        child: const Text('Напечатать'),
+                      ),
+                    if (settings.rerollEnabled)
+                      TextButton(
+                        onPressed: summon.loading
+                            ? null
+                            : () => summon.reroll(
+                                colors: settings.colorFilter,
+                                media: settings.printMedia,
+                              ),
+                        child: const Text('Ещё раз'),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
   }
 
-  Future<void> _print(PrintService printService, SummonController summon) async {
-    final card = summon.card;
-    if (card == null) return;
+  Future<void> _print(
+    PrintService printService,
+    SummonController summon,
+    SettingsController settings,
+  ) async {
     setState(() => _printStatus = 'Идёт печать…');
     try {
+      await summon.renderCurrent(media: settings.printMedia);
+      final card = summon.card;
+      if (card == null) {
+        if (mounted) {
+          setState(() => _printStatus = 'Печать не прошла. Повторите.');
+        }
+        return;
+      }
       await printService.printCard(card);
       if (mounted) {
-        setState(() => _printStatus = 'Готово. Оторвите чек вручную.');
+        setState(
+          () => _printStatus = settings.printMedia == PrintMedia.label40x58
+              ? 'Готово. Этикетка напечатана.'
+              : 'Готово. Оторвите чек вручную.',
+        );
       }
     } catch (_) {
       if (mounted) {

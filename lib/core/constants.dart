@@ -8,6 +8,7 @@ const kPrefsPrinterName = 'printer_name';
 const kPrefsPrinterKind = 'printer_link_kind';
 const kPrefsReroll = 'reroll_enabled';
 const kPrefsColorFilter = 'color_filter';
+const kPrefsPrintMedia = 'print_media';
 const kPrefsLastSyncIso = 'last_sync_iso';
 const kMetaLastSync = 'last_sync_iso';
 const kMetaCreatureCount = 'creature_count';
@@ -16,6 +17,13 @@ const kArtWidth = 384;
 /// Real Magic card is 63.5 × 88.9 mm. On a 57 mm roll the whole receipt
 /// (art and text) scales to 57 × 88.9 / 63.5 ≈ 79.8 mm, 638 dots at 203 dpi.
 const kPrintCardHeight = 638;
+
+/// 40×58 mm die-cut label at 203 dpi. Both axes are multiples of 8 dots.
+const kLabelWidthDots = 320;
+const kLabelHeightDots = 464;
+
+/// Gap between 40×58 labels. Change this if the printer skips or double-feeds.
+const kLabelGapMm = 2.0;
 
 /// Art window is about 39.9 mm of the 88.9 mm card, so the rules text still fits.
 const kArtHeight = 286;
